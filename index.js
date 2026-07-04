@@ -13,7 +13,13 @@ const app = express();
 app.use(bodyParser.json({
   verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); }
 }));
-app.use(bodyParser.urlencoded({ extended: true }));
+// Capture the raw body for urlencoded requests too — Slack sends interactivity
+// (button clicks / modals) as application/x-www-form-urlencoded, and signature
+// verification needs the exact raw bytes. Without this, actions return 401.
+app.use(bodyParser.urlencoded({
+  extended: true,
+  verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); }
+}));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), mode: 'stateless' });
