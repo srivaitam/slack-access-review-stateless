@@ -8,6 +8,11 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore') {
     userAccessArray.sort((a, b) => b.aggregateRiskScore - a.aggregateRiskScore);
   }
 
+  const people = userAccessArray.map(ua => ua.user);
+  const adminCount = people.filter(u => u.role === 'Owner' || u.role === 'Admin').length;
+  const guestCount = people.filter(u => u.role === 'Guest').length;
+  const deactivatedCount = people.filter(u => !u.active).length;
+
   const blocks = [
     {
       type: 'header',
@@ -17,7 +22,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore') {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `*Workspace Overview*\n👥 ${metadata.totalUsers} users | 📢 ${metadata.totalChannels} channels | ⏱️ Updated: ${new Date(metadata.generatedAt).toLocaleString()}`
+        text: `*Workspace Overview*\n👥 ${metadata.totalUsers} users — ${adminCount} admin/owner · ${guestCount} guest · ${deactivatedCount} deactivated\n📢 ${metadata.totalChannels} channels | ⏱️ Updated: ${new Date(metadata.generatedAt).toLocaleString()}`
       }
     },
     {
@@ -46,7 +51,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore') {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${userAccess.user.name}* ${riskEmoji}\n📧 ${userAccess.user.email}\n📊 Risk: ${userAccess.aggregateRiskScore}/100 (${riskLevel})`
+          text: `*${userAccess.user.name}* ${riskEmoji}\n📧 ${userAccess.user.email}\n👤 ${userAccess.user.role} · ${userAccess.user.active ? '✅ Active' : '🚫 Deactivated'}\n📊 Risk: ${userAccess.aggregateRiskScore}/100 (${riskLevel})`
         },
         accessory: {
           type: 'button',

@@ -32,7 +32,7 @@ function buildUserAccessModal(userAccess) {
       text: {
         type: 'mrkdwn',
         text: '*' + user.name + '*\n' +
-              '📧 ' + user.email + ' | 👤 ' + user.role + '\n' +
+              '📧 ' + user.email + ' | 👤 ' + user.role + ' · ' + (user.active ? '✅ Active' : '🚫 Deactivated') + '\n' +
               '📊 Risk Score: ' + aggregateRiskScore + '/100 ' + getRiskEmoji(aggregateRiskScore) + ' ' + getRiskLevel(aggregateRiskScore)
       }
     },

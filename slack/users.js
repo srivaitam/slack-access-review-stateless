@@ -17,10 +17,14 @@ async function getAllUsers() {
       id: u.id,
       name: u.profile.real_name || u.name,
       email: u.profile.email,
-      role: u.is_owner ? 'Owner' : u.is_admin ? 'Admin' : 'Member',
+      role: u.is_owner ? 'Owner'
+        : u.is_admin ? 'Admin'
+        : (u.is_ultra_restricted || u.is_restricted) ? 'Guest'
+        : 'Member',
       active: !u.deleted,
       is_owner: u.is_owner || false,
-      is_admin: u.is_admin || false
+      is_admin: u.is_admin || false,
+      is_guest: Boolean(u.is_restricted || u.is_ultra_restricted)
     }));
 }
 
