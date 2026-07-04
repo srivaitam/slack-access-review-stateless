@@ -1,6 +1,7 @@
 const { getRiskEmoji, getRiskLevel } = require('../services/riskScoringService');
+const { campaignProgress } = require('../services/campaignService');
 
-function buildAccessOverviewView(snapshot, sortBy = 'riskScore') {
+function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = []) {
   const { userAccessMap, metadata } = snapshot;
   let userAccessArray = Array.from(userAccessMap.values());
 
@@ -33,8 +34,35 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore') {
         { type: 'button', text: { type: 'plain_text', text: '📊 Export Excel' }, action_id: 'export_excel' }
       ]
     },
+    {
+      type: 'actions',
+      elements: [
+        { type: 'button', text: { type: 'plain_text', text: '🗂 Browse Channels' }, action_id: 'browse_channels' },           // F-002
+        { type: 'button', text: { type: 'plain_text', text: '📥 Channel Audit CSV' }, action_id: 'export_membership_csv' },   // F-001
+        { type: 'button', text: { type: 'plain_text', text: '📋 New Review Campaign' }, action_id: 'create_campaign' }        // F-003
+      ]
+    },
     { type: 'divider' }
   ];
+
+  // F-003: active campaign progress
+  if (campaigns && campaigns.length > 0) {
+    blocks.push({ type: 'header', text: { type: 'plain_text', text: '📋 Active Review Campaigns' } });
+    campaigns.slice(0, 5).forEach(c => {
+      const p = campaignProgress(c);
+      const overdue = c.dueDate && c.dueDate < new Date().toISOString().slice(0, 10);
+      blocks.push({
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${c.name}*${overdue ? ' ⏰ *OVERDUE*' : ''}\n` +
+            `${p.decided}/${p.total} reviewed (${p.percent}%) · 🗑 ${p.removals} removals · 🚩 ${p.flags} flags\n` +
+            `📢 ${c.channels.length} channels · due ${c.dueDate} · ${c.recurrence !== 'none' ? '🔁 ' + c.recurrence : 'one-off'}`
+        }
+      });
+    });
+    blocks.push({ type: 'divider' });
+  }
 
   if (metadata.erroredChannels > 0) {
     blocks.push(

@@ -3,16 +3,30 @@ const { generateAccessSnapshot } = require('../services/accessService');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildLoadingView } = require('../views/loadingView');
-const { generateCSV, generateExcelXML } = require('../services/exportService');
+const { generateCSV, generateExcelXML, generateMembershipCSV } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
+const { getInternalDomains } = require('../services/riskScoringService');
+const { buildChannelBrowserModal, buildChannelMembersModal } = require('../views/channelBrowserModal');
+const { buildCampaignCreateModal } = require('../views/campaignModal');
+const { recordDecision, getCampaign, listCampaigns } = require('../services/campaignService');
+const { markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 
 async function handleAction(payload) {
   const userId = payload.user.id;
   const action = payload.actions[0].action_id;
 
+  // F-004/F-005: reviewer decisions are NOT admin-only (channel owners review
+  // their own channels) — campaignService enforces assigned-reviewer identity.
+  if (action === 'review_decision') {
+    return handleReviewDecision(payload);
+  }
+
   // Authorization (C3/M6): actions that expose or act on the whole workspace
   // require an owner/admin. (view_user_detail keeps its own inline modal check.)
-  const ADMIN_ONLY = new Set(['refresh_access_data', 'export_csv', 'export_excel']);
+  const ADMIN_ONLY = new Set([
+    'refresh_access_data', 'export_csv', 'export_excel',
+    'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign'
+  ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
       channel: userId,
@@ -29,10 +43,64 @@ async function handleAction(payload) {
         view: buildLoadingView('Refreshing access data from Slack...')
       });
       const snapshot = await generateAccessSnapshot({ force: true });
+      const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot)
+        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns)
       });
+    }
+
+    // ─── F-001: channel-wise membership export ───
+    if (action === 'export_membership_csv') {
+      const dm = await slack.conversations.open({ users: userId });
+      const dmChannelId = dm.channel.id;
+      await slack.chat.postMessage({ channel: dmChannelId, text: '⏳ Generating channel audit CSV (one row per channel × member)...' });
+
+      const { csv, metadata } = await generateMembershipCSV();
+      const timestamp = new Date().toISOString().slice(0, 10);
+      await slack.filesUploadV2({
+        channel_id: dmChannelId,
+        file: Buffer.from(csv, 'utf-8'),
+        filename: `channel-audit-${timestamp}.csv`,
+        title: `Channel Audit Export - ${timestamp}`,
+        initial_comment: `📥 *Channel Audit CSV Complete*\n🔗 ${metadata.totalMemberships} memberships | 📢 ${metadata.totalChannels} channels | 👥 ${metadata.totalUsers} users\n_One row per channel × member — sort by Channel to certify a channel, by Email to certify a person._`
+      });
+    }
+
+    // ─── F-002: channel browser ───
+    if (action === 'browse_channels') {
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildChannelBrowserModal() });
+    }
+
+    if (action === 'channel_browser_select') {
+      const channelId = payload.actions[0].selected_conversation;
+      const snapshot = await generateAccessSnapshot();
+      const entry = snapshot.channels.find(c => c.channel.id === channelId);
+      const viewId = payload.container?.view_id || payload.view?.id;
+      if (!entry) {
+        await slack.views.update({
+          view_id: viewId,
+          view: {
+            type: 'modal',
+            callback_id: 'channel_browser_modal',
+            title: { type: 'plain_text', text: 'Channel Audit' },
+            close: { type: 'plain_text', text: 'Close' },
+            blocks: buildChannelBrowserModal().blocks.concat([
+              { type: 'section', text: { type: 'mrkdwn', text: '⚠️ That conversation is not in the current access snapshot (it may be archived, a DM, or not yet scanned). Try *Refresh* on the dashboard first.' } }
+            ])
+          }
+        });
+      } else {
+        await slack.views.update({
+          view_id: viewId,
+          view: buildChannelMembersModal(entry, getInternalDomains(snapshot.users))
+        });
+      }
+    }
+
+    // ─── F-003: create review campaign ───
+    if (action === 'create_campaign') {
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
     }
 
     // ─── Export CSV ───
@@ -77,7 +145,7 @@ async function handleAction(payload) {
         file: Buffer.from(xmlContent, 'utf-8'),
         filename: `access-review-${timestamp}.xml`,
         title: `Access Review Export - ${timestamp}`,
-        initial_comment: `📊 *Excel Export Complete*\n👥 ${data.metadata.totalUsers} users | 📢 ${data.metadata.totalChannels} channels\n_Contains 2 sheets: Users & Channels_`
+        initial_comment: `📊 *Excel Export Complete*\n👥 ${data.metadata.totalUsers} users | 📢 ${data.metadata.totalChannels} channels\n_Contains 3 sheets: Users, Channels & Memberships (one row per channel × member)_`
       });
     }
 
@@ -131,6 +199,86 @@ async function handleAction(payload) {
   }
 }
 
+// ─── F-004/F-005: reviewer Keep/Remove/Flag decision from a DM checklist ───
+// Overflow value format: "campaignId|channelId|userId|k" (k=keep, r=remove, f=flag)
+async function handleReviewDecision(payload) {
+  const userId = payload.user.id;
+  try {
+    const raw = payload.actions[0].selected_option?.value || '';
+    const [campaignId, channelId, targetUserId, code] = raw.split('|');
+    const decision = code === 'k' ? 'keep' : code === 'r' ? 'remove' : code === 'f' ? 'flag' : null;
+    if (!campaignId || !channelId || !targetUserId || !decision) return;
+
+    // Remove/Flag require a justification (F-005) — collect it in a modal.
+    if (decision !== 'keep') {
+      await slack.views.open({
+        trigger_id: payload.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'review_justification_modal',
+          private_metadata: JSON.stringify({
+            campaignId, channelId, targetUserId, decision,
+            msgChannel: payload.container?.channel_id,
+            msgTs: payload.message?.ts,
+            blockId: `rev_${channelId}_${targetUserId}`
+          }),
+          title: { type: 'plain_text', text: decision === 'remove' ? 'Remove — justification' : 'Flag — justification' },
+          submit: { type: 'plain_text', text: 'Record decision' },
+          close: { type: 'plain_text', text: 'Cancel' },
+          blocks: [{
+            type: 'input',
+            block_id: 'justification',
+            label: { type: 'plain_text', text: 'Why? (recorded in the audit evidence)' },
+            element: {
+              type: 'plain_text_input',
+              action_id: 'justification_input',
+              multiline: true,
+              min_length: 10,
+              placeholder: { type: 'plain_text', text: 'e.g. Left the project in May; no longer needs access.' }
+            }
+          }]
+        }
+      });
+      return;
+    }
+
+    // Keep: record immediately.
+    const info = await slack.users.info({ user: userId });
+    const reviewer = {
+      id: userId,
+      name: info.user.profile.real_name || info.user.name,
+      email: info.user.profile.email || 'unknown'
+    };
+    const result = await recordDecision({
+      campaignId, channelId, targetUserId, decision, reviewer,
+      reviewerIsAdmin: Boolean(info.user.is_owner || info.user.is_admin)
+    });
+
+    if (!result.ok) {
+      await slack.chat.postMessage({ channel: userId, text: `⚠️ Could not record decision: ${result.error}` }).catch(() => {});
+      return;
+    }
+
+    if (payload.message?.ts && payload.container?.channel_id) {
+      await markDecisionInMessage({
+        channelOfMessage: payload.container.channel_id,
+        messageTs: payload.message.ts,
+        blocks: payload.message.blocks,
+        blockId: `rev_${channelId}_${targetUserId}`,
+        decision,
+        reviewerName: reviewer.name
+      }).catch(e => console.error('[REVIEW] block update failed:', e.message));
+    }
+
+    if (result.campaign.status === 'completed') {
+      await notifyCampaignComplete(result.campaign);
+    }
+  } catch (error) {
+    console.error('Review decision error:', error.message);
+    await slack.chat.postMessage({ channel: userId, text: '❌ Something went wrong recording that decision. Please try again.' }).catch(() => {});
+  }
+}
+
 /**
  * Build XML Spreadsheet 2003 format (.xls)
  */
@@ -165,6 +313,7 @@ function buildExcelXml(data) {
     '<Styles><Style ss:ID="header"><Font ss:Bold="1"/><Interior ss:Color="#D9E1F2" ss:Pattern="Solid"/></Style></Styles>' +
     sheet('Users', data.users.headers, data.users.rows) +
     sheet('Channels', data.channels.headers, data.channels.rows) +
+    (data.memberships ? sheet('Memberships', data.memberships.headers, data.memberships.rows) : '') + // F-001
     '</Workbook>';
 }
 

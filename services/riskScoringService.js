@@ -69,4 +69,4 @@ function getRiskEmoji(score) {
   return '🟢';
 }
 
-module.exports = { calculateChannelRisk, calculateUserRiskScore, getPrimaryDomain, getRiskLevel, getRiskEmoji };
+module.exports = { calculateChannelRisk, calculateUserRiskScore, getPrimaryDomain, getRiskLevel, getRiskEmoji, getInternalDomains };

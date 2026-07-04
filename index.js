@@ -125,3 +125,28 @@ const AUDIT_VERIFY_INTERVAL_MS = Number(process.env.AUDIT_VERIFY_INTERVAL_MS || 
 if (AUDIT_VERIFY_INTERVAL_MS > 0) {
   setInterval(runAuditIntegrityCheck, AUDIT_VERIFY_INTERVAL_MS).unref();
 }
+
+// F-003 recurrence: spawn the next occurrence of completed/overdue recurring
+// campaigns. Runs at boot and daily.
+async function runCampaignRecurrenceCheck() {
+  try {
+    const { findCampaignsNeedingRecurrence, nextDueDate, markRecurrenceSpawned } = require('./services/campaignService');
+    const { launchCampaign } = require('./handlers/viewSubmissionHandler');
+    const due = await findCampaignsNeedingRecurrence();
+    for (const c of due) {
+      await markRecurrenceSpawned(c.id); // mark first so a crash can't double-spawn
+      await launchCampaign({
+        name: c.name.replace(/ \(\d{4}-\d{2}-\d{2}\)$/, '') + ` (${new Date().toISOString().slice(0, 10)})`,
+        scope: c.scope,
+        dueDate: nextDueDate(c.dueDate, c.recurrence),
+        recurrence: c.recurrence,
+        createdBy: c.createdBy
+      });
+      logInfo(`Recurring campaign respawned from ${c.id} (${c.name})`);
+    }
+  } catch (e) {
+    logError('Campaign recurrence check failed:', e.message);
+  }
+}
+runCampaignRecurrenceCheck();
+setInterval(runCampaignRecurrenceCheck, 24 * 60 * 60 * 1000).unref();

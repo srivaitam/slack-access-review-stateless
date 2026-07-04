@@ -1,5 +1,5 @@
 const { generateAccessSnapshot } = require('../services/accessService');
-const { getRiskLevel } = require('../services/riskScoringService');
+const { getRiskLevel, getInternalDomains } = require('../services/riskScoringService');
 
 /**
  * Generate CSV string from access snapshot
@@ -89,8 +89,55 @@ async function generateExcelXML() {
   return {
     users: { headers, rows: dataRows },
     channels: { headers: channelHeaders, rows: channelRows },
+    memberships: { headers: MEMBERSHIP_HEADERS, rows: buildMembershipRows(snapshot) }, // F-001
     metadata: snapshot.metadata
   };
+}
+
+// F-001: channel-centric membership export — one row per (channel, user)
+// pair. This is the normalized "long" format auditors expect: sort/pivot by
+// channel to certify a channel, or by user to certify a person.
+function buildMembershipRows(snapshot) {
+  const internalDomains = getInternalDomains(snapshot.users);
+  const rows = [];
+  const sorted = [...snapshot.channels].sort((a, b) => b.riskScore - a.riskScore || a.channel.name.localeCompare(b.channel.name));
+  for (const { channel, members, riskScore, errored } of sorted) {
+    for (const m of members) {
+      const external = !internalDomains.has((m.email.split('@')[1] || '').toLowerCase());
+      rows.push([
+        channel.name,
+        channel.id,
+        channel.is_private ? 'Private' : 'Public',
+        riskScore,
+        getRiskLevel(riskScore),
+        m.name,
+        m.email,
+        m.role,
+        m.active ? 'Yes' : 'No',
+        external ? 'Yes' : 'No',
+        m.role === 'Guest' ? 'Yes' : 'No',
+        errored ? 'Partial (channel read error)' : 'Complete'
+      ]);
+    }
+  }
+  return rows;
+}
+
+const MEMBERSHIP_HEADERS = [
+  'Channel', 'Channel ID', 'Type', 'Channel Risk Score', 'Channel Risk Level',
+  'User Name', 'Email', 'Role', 'Active', 'External Domain', 'Guest', 'Data Quality'
+];
+
+/**
+ * Generate the channel-wise audit CSV (one row per channel×user).
+ */
+async function generateMembershipCSV() {
+  const snapshot = await generateAccessSnapshot();
+  const rows = [MEMBERSHIP_HEADERS.join(',')];
+  for (const r of buildMembershipRows(snapshot)) {
+    rows.push(r.map(csvEscape).join(','));
+  }
+  return { csv: rows.join('\n'), metadata: { ...snapshot.metadata, totalMemberships: rows.length - 1 } };
 }
 
 function csvEscape(val) {
@@ -108,4 +155,4 @@ function csvEscape(val) {
   return str;
 }
 
-module.exports = { generateCSV, generateExcelXML, csvEscape };
+module.exports = { generateCSV, generateExcelXML, generateMembershipCSV, csvEscape };

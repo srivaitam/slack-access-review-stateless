@@ -3,6 +3,9 @@ const { buildRevocationConfirmModal } = require('../modals/revocationConfirmModa
 const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
+const { generateAccessSnapshot } = require('../services/accessService');
+const { createCampaign, recordDecision } = require('../services/campaignService');
+const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const crypto = require('crypto');
 
 async function handleViewSubmission(payload) {
@@ -11,7 +14,8 @@ async function handleViewSubmission(payload) {
 
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation') {
+  // Campaign creation (F-003) is admin-only too.
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -26,6 +30,96 @@ async function handleViewSubmission(payload) {
         }
       };
     }
+  }
+
+  // F-003: launch a review campaign
+  if (callbackId === 'campaign_create_modal') {
+    const v = payload.view.state.values;
+    const name = v.campaign_name?.name_input?.value?.trim();
+    const scope = v.campaign_scope?.scope_select?.selected_option?.value;
+    const dueDate = v.campaign_due?.due_date?.selected_date;
+    const recurrence = v.campaign_recurrence?.recurrence_select?.selected_option?.value || 'none';
+
+    if (!name || name.length < 3) {
+      return { response_action: 'errors', errors: { campaign_name: 'Please give the campaign a name (3+ characters).' } };
+    }
+    if (!dueDate || dueDate < new Date().toISOString().slice(0, 10)) {
+      return { response_action: 'errors', errors: { campaign_due: 'Due date must be today or later.' } };
+    }
+
+    const adminInfo = await slack.users.info({ user: adminId });
+    const createdBy = {
+      id: adminId,
+      name: adminInfo.user.profile.real_name || adminInfo.user.name,
+      email: adminInfo.user.profile.email || 'unknown'
+    };
+
+    // Launch in background — snapshot + checklist fan-out can exceed the
+    // 3-second modal window.
+    setImmediate(() => {
+      launchCampaign({ name, scope, dueDate, recurrence, createdBy })
+        .catch(err => {
+          console.error('[CAMPAIGN] launch failed:', err.message);
+          slack.chat.postMessage({ channel: adminId, text: `❌ Campaign "${name}" failed to launch: ${err.message}` }).catch(() => {});
+        });
+    });
+
+    return { response_action: 'clear' };
+  }
+
+  // F-005: justification for a Remove/Flag decision
+  if (callbackId === 'review_justification_modal') {
+    const meta = JSON.parse(payload.view.private_metadata);
+    const justification = payload.view.state.values.justification?.justification_input?.value?.trim();
+    if (!justification || justification.length < 10) {
+      return { response_action: 'errors', errors: { justification: 'Please provide a justification of at least 10 characters.' } };
+    }
+
+    const info = await slack.users.info({ user: adminId });
+    const reviewer = {
+      id: adminId,
+      name: info.user.profile.real_name || info.user.name,
+      email: info.user.profile.email || 'unknown'
+    };
+
+    const result = await recordDecision({
+      campaignId: meta.campaignId,
+      channelId: meta.channelId,
+      targetUserId: meta.targetUserId,
+      decision: meta.decision,
+      reviewer,
+      justification,
+      reviewerIsAdmin: Boolean(info.user.is_owner || info.user.is_admin)
+    });
+
+    if (!result.ok) {
+      return { response_action: 'errors', errors: { justification: 'Could not record: ' + result.error } };
+    }
+
+    // Update the checklist DM in the background (needs a message fetch).
+    setImmediate(async () => {
+      try {
+        if (meta.msgChannel && meta.msgTs) {
+          const hist = await slack.conversations.history({ channel: meta.msgChannel, latest: meta.msgTs, inclusive: true, limit: 1 });
+          const msg = hist.messages && hist.messages[0];
+          if (msg && msg.ts === meta.msgTs) {
+            await markDecisionInMessage({
+              channelOfMessage: meta.msgChannel,
+              messageTs: meta.msgTs,
+              blocks: msg.blocks,
+              blockId: meta.blockId,
+              decision: meta.decision,
+              reviewerName: reviewer.name
+            });
+          }
+        }
+        if (result.campaign.status === 'completed') await notifyCampaignComplete(result.campaign);
+      } catch (e) {
+        console.error('[REVIEW] post-decision update failed:', e.message);
+      }
+    });
+
+    return { response_action: 'clear' };
   }
 
   // Step 1: Revoke Selected clicked
@@ -179,4 +273,45 @@ async function handleViewSubmission(payload) {
   return null;
 }
 
-module.exports = { handleViewSubmission };
+// F-003/F-004: snapshot → campaign → DM checklists → confirm to creator.
+async function launchCampaign({ name, scope, dueDate, recurrence, createdBy }) {
+  const snapshot = await generateAccessSnapshot();
+  const campaign = await createCampaign({ name, scope, dueDate, recurrence, createdBy, snapshot });
+
+  if (campaign.channels.length === 0) {
+    await slack.chat.postMessage({
+      channel: createdBy.id,
+      text: `⚠️ Campaign "${name}" launched but matched 0 channels for scope "${scope}". Nothing to review.`
+    });
+    return campaign;
+  }
+
+  const { sent, failed } = await sendReviewChecklists(campaign);
+  const totalMembers = campaign.channels.reduce((s, c) => s + c.members.length, 0);
+
+  let failText = '';
+  if (failed.length) {
+    failText = `\n⚠️ Could not reach ${failed.length} reviewer(s): ` +
+      failed.slice(0, 5).map(f => `#${f.channel}`).join(', ') +
+      (failed.length > 5 ? '…' : '') + ' — review those channels from the dashboard.';
+  }
+
+  await slack.chat.postMessage({
+    channel: createdBy.id,
+    text: `Campaign "${name}" launched.`,
+    blocks: [{
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `🚀 *Campaign launched: ${name}*\n` +
+          `Scope: ${scope} · Due: ${dueDate} · Recurrence: ${recurrence}\n` +
+          `📢 ${campaign.channels.length} channel(s) · 🔗 ${totalMembers} membership(s) to review\n` +
+          `✉️ Checklists sent to ${sent} reviewer(s).${failText}\n` +
+          `_Campaign ID: ${campaign.id} — progress is visible on the dashboard._`
+      }
+    }]
+  });
+  return campaign;
+}
+
+module.exports = { handleViewSubmission, launchCampaign };

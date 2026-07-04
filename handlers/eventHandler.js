@@ -3,6 +3,7 @@ const { generateAccessSnapshot } = require('../services/accessService');
 const { buildLoadingView } = require('../views/loadingView');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { isWorkspaceAdmin } = require('../utils/authz');
+const { listCampaigns } = require('../services/campaignService');
 
 function homeMessage(text) {
   return { type: 'home', blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] };
@@ -26,9 +27,10 @@ async function handleEvent(event) {
         view: buildLoadingView('Fetching access data from Slack...')
       });
       const snapshot = await generateAccessSnapshot();
+      const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot)
+        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns)
       });
     } catch (error) {
       console.error('Home load error:', error.message);
