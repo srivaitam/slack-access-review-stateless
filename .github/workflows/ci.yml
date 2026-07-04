@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Dependency audit (fail on high or critical)
+        run: npm audit --audit-level=high
+
+      - name: Secret scan (no Slack tokens in tracked files)
+        run: |
+          if grep -rEnI 'xox[baprs]-[0-9]{6,}' --exclude-dir=node_modules --exclude='*.example' .; then
+            echo '::error::Potential Slack token committed'
+            exit 1
+          fi
+          echo 'No secrets found'

@@ -1,0 +1,42 @@
+# Render Blueprint for the Slack Access Review app.
+# One Node web service + a small persistent disk for the audit log.
+# No database or Redis is required.
+#
+# To use: commit this file to your repo, then in Render click
+#   New +  →  Blueprint  →  pick this repo.
+# Render reads this file and creates the service. You'll be prompted to fill
+# in the two secret values marked `sync: false` (bot token + signing secret).
+
+services:
+  - type: web
+    name: slack-access-review
+    runtime: node
+    plan: starter            # always-on. Use "free" only for testing (it sleeps after 15 min idle).
+    region: oregon           # pick the region closest to you
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true         # redeploy automatically on every git push
+
+    # Keeps the audit log across deploys/restarts (Render's normal disk is wiped each deploy).
+    disk:
+      name: audit-logs
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: AUDIT_LOG_DIR
+        value: /var/data/audit-logs      # write the audit log onto the persistent disk
+      - key: AUDIT_HMAC_SECRET
+        generateValue: true              # Render generates a strong random secret for you
+      - key: SLACK_BOT_TOKEN
+        sync: false                      # you paste this in the dashboard (never commit it)
+      - key: SLACK_SIGNING_SECRET
+        sync: false                      # you paste this in the dashboard (never commit it)
+      # ---- optional tuning (safe to leave unset) ----
+      # - key: INTERNAL_EMAIL_DOMAINS
+      #   value: yourcompany.com
+      # - key: AUDIT_WEBHOOK_URL
+      #   sync: false

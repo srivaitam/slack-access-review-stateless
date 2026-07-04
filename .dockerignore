@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+audit-logs
+exports
+.git
+.gitignore
+*.log
+.DS_Store
+*.zip
