@@ -80,10 +80,10 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
     {
       type: 'section',
       fields: [
-        { type: 'mrkdwn', text: `👥 *Members:*  ${metadata.totalUsers}` },
-        { type: 'mrkdwn', text: `📢 *Channels:*  ${metadata.totalChannels}` },
-        { type: 'mrkdwn', text: `🛡️ *Admins / owners:*  ${adminCount}` },
-        { type: 'mrkdwn', text: `👤 *Guests:*  ${guestCount}` },
+        { type: 'mrkdwn', text: `👥 *Members:*  ${metadata.totalUsers}\n​` },
+        { type: 'mrkdwn', text: `📢 *Channels:*  ${metadata.totalChannels}\n​` },
+        { type: 'mrkdwn', text: `🛡️ *Admins / owners:*  ${adminCount}\n​` },
+        { type: 'mrkdwn', text: `👤 *Guests:*  ${guestCount}\n​` },
         { type: 'mrkdwn', text: `🚫 *Deactivated:*  ${deactivatedCount}` },
         { type: 'mrkdwn', text: `⚠️ *High-risk users:*  ${highRiskUsers}` }
       ]
