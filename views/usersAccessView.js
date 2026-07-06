@@ -74,8 +74,9 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
   const blocks = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: '🔐 Access review' }
+      text: { type: 'plain_text', text: '🔐 Access review dashboard' }
     },
+    { type: 'section', text: { type: 'plain_text', text: ' ' } },
     {
       type: 'section',
       fields: [
@@ -87,6 +88,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
         { type: 'mrkdwn', text: `⚠️ *High-risk users:*  ${highRiskUsers}` }
       ]
     },
+    { type: 'section', text: { type: 'plain_text', text: ' ' } },
     {
       type: 'context',
       elements: [{
