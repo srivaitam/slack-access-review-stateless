@@ -52,7 +52,8 @@ function userRow(userAccess) {
         type: 'mrkdwn',
         text: `${user.email} · ${user.role} · ${totalChannels} channels (${publicChannels.length} public, ${privateChannels.length} private)${highRisk}`
       }]
-    }
+    },
+    { type: 'divider' }
   ];
 }
 
@@ -78,12 +79,12 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
     {
       type: 'section',
       fields: [
-        { type: 'mrkdwn', text: `*Members*\n${metadata.totalUsers}` },
-        { type: 'mrkdwn', text: `*Channels*\n${metadata.totalChannels}` },
-        { type: 'mrkdwn', text: `*Admins / owners*\n${adminCount}` },
-        { type: 'mrkdwn', text: `*Guests*\n${guestCount}` },
-        { type: 'mrkdwn', text: `*Deactivated*\n${deactivatedCount}` },
-        { type: 'mrkdwn', text: `*Users w/ high-risk channels*\n${highRiskUsers}` }
+        { type: 'mrkdwn', text: `👥 *Members:*  ${metadata.totalUsers}` },
+        { type: 'mrkdwn', text: `📢 *Channels:*  ${metadata.totalChannels}` },
+        { type: 'mrkdwn', text: `🛡️ *Admins / owners:*  ${adminCount}` },
+        { type: 'mrkdwn', text: `👤 *Guests:*  ${guestCount}` },
+        { type: 'mrkdwn', text: `🚫 *Deactivated:*  ${deactivatedCount}` },
+        { type: 'mrkdwn', text: `⚠️ *High-risk users:*  ${highRiskUsers}` }
       ]
     },
     {
@@ -157,7 +158,6 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
 
   // Deactivated members — collapsed by default
   if (deactivated.length > 0) {
-    blocks.push({ type: 'divider' });
     if (showDeactivated) {
       blocks.push({
         type: 'section',
