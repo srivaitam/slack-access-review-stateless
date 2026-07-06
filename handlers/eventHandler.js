@@ -1,4 +1,4 @@
-const { slack } = require('../slack/client');
+const { slack, invalidateTeamClient } = require('../slack/client');
 const { generateAccessSnapshot } = require('../services/accessService');
 const { buildLoadingView } = require('../views/loadingView');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
@@ -10,6 +10,23 @@ function homeMessage(text) {
 }
 
 async function handleEvent(event) {
+  // Public-distribution lifecycle: when a workspace removes the app (or its
+  // tokens are revoked), delete its stored token — and on full uninstall,
+  // wipe that workspace's campaigns + audit entries too (we keep no data for
+  // workspaces that removed the app).
+  const lifecycleType = event.event?.type;
+  if (lifecycleType === 'app_uninstalled' || lifecycleType === 'tokens_revoked') {
+    const teamId = event.team_id;
+    if (teamId) {
+      const { deleteInstallation } = require('../services/installationService');
+      invalidateTeamClient(teamId);
+      await deleteInstallation(teamId, { wipeData: lifecycleType === 'app_uninstalled' })
+        .catch(e => console.error('[LIFECYCLE] cleanup failed for', teamId, e.message));
+      console.log('[LIFECYCLE]', lifecycleType, '— installation removed for team', teamId);
+    }
+    return;
+  }
+
   if (event.event?.type === 'app_home_opened') {
     const userId = event.event.user;
     try {

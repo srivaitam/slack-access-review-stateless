@@ -2,12 +2,18 @@ const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { logAuditEvent } = require('./auditService');
+const db = require('../utils/db');
+const { getCurrentTeamId } = require('../slack/client');
 
-// F-003/F-005: file-based campaign + decision store. Same posture as the audit
-// log — no database, one JSON file per campaign under CAMPAIGN_DIR. Every
-// decision is ALSO chained into the tamper-evident audit log, so the campaign
-// files are a working state/progress view while the audit chain is the
-// authoritative evidence trail.
+// F-003/F-005: campaign + decision store. Dual-mode:
+//   - DB mode (DATABASE_URL): one row per campaign in the campaigns table,
+//     keyed by (team_id, id) — required for multi-workspace public
+//     distribution. Mutations take a row lock (SELECT ... FOR UPDATE).
+//   - File mode: original single-workspace JSON files under CAMPAIGN_DIR
+//     (dev/tests).
+// Every decision is ALSO chained into the tamper-evident audit log, so the
+// campaign store is a working state/progress view while the audit chain is
+// the authoritative evidence trail.
 const CAMPAIGN_DIR = process.env.CAMPAIGN_DIR || './campaigns';
 
 // Serialize writes so concurrent decisions can't clobber a campaign file.
@@ -29,7 +35,18 @@ function newCampaignId() {
   return 'c' + Date.now().toString(36) + crypto.randomBytes(2).toString('hex');
 }
 
+// ── Storage primitives (dual-mode) ─────────────────────────────────────────
+
 async function saveCampaign(campaign) {
+  if (db.isDbEnabled()) {
+    const teamId = campaign.teamId || getCurrentTeamId();
+    await db.query(`
+      INSERT INTO campaigns (team_id, id, status, created_at, data)
+      VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (team_id, id) DO UPDATE SET status = EXCLUDED.status, data = EXCLUDED.data
+    `, [teamId, campaign.id, campaign.status, campaign.createdAt, JSON.stringify(campaign)]);
+    return campaign;
+  }
   return enqueue(async () => {
     await fs.mkdir(CAMPAIGN_DIR, { recursive: true });
     const tmp = campaignFile(campaign.id) + '.tmp';
@@ -39,7 +56,12 @@ async function saveCampaign(campaign) {
   });
 }
 
-async function getCampaign(id) {
+async function getCampaign(id, teamId = getCurrentTeamId()) {
+  if (db.isDbEnabled()) {
+    if (!/^c[a-z0-9]+$/.test(String(id))) return null;
+    const { rows } = await db.query('SELECT data FROM campaigns WHERE team_id = $1 AND id = $2', [teamId, id]);
+    return rows.length ? rows[0].data : null;
+  }
   try {
     return JSON.parse(await fs.readFile(campaignFile(id), 'utf8'));
   } catch (e) {
@@ -47,7 +69,16 @@ async function getCampaign(id) {
   }
 }
 
-async function listCampaigns({ activeOnly = false } = {}) {
+async function listCampaigns({ activeOnly = false, teamId = getCurrentTeamId() } = {}) {
+  if (db.isDbEnabled()) {
+    const { rows } = await db.query(
+      activeOnly
+        ? "SELECT data FROM campaigns WHERE team_id = $1 AND status = 'active'"
+        : 'SELECT data FROM campaigns WHERE team_id = $1',
+      [teamId]);
+    return rows.map(r => r.data)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
   let names;
   try { names = await fs.readdir(CAMPAIGN_DIR); }
   catch (e) { return []; }
@@ -61,6 +92,46 @@ async function listCampaigns({ activeOnly = false } = {}) {
   }
   return out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 }
+
+/**
+ * Read-modify-write a campaign atomically. mutate(campaign) returns a result
+ * object; if it returns {ok:true}, the campaign is persisted.
+ * DB mode: row lock in a transaction (safe across instances).
+ * File mode: in-process queue (original behaviour).
+ */
+async function mutateCampaign(id, mutate) {
+  if (db.isDbEnabled()) {
+    const teamId = getCurrentTeamId();
+    if (!/^c[a-z0-9]+$/.test(String(id))) return { ok: false, error: 'Campaign not found' };
+    return db.withTx(async client => {
+      const { rows } = await client.query(
+        'SELECT data FROM campaigns WHERE team_id = $1 AND id = $2 FOR UPDATE', [teamId, id]);
+      if (!rows.length) return { ok: false, error: 'Campaign not found' };
+      const campaign = rows[0].data;
+      const result = await mutate(campaign);
+      if (result && result.ok) {
+        await client.query(
+          'UPDATE campaigns SET status = $3, data = $4 WHERE team_id = $1 AND id = $2',
+          [teamId, id, campaign.status, JSON.stringify(campaign)]);
+      }
+      return result;
+    });
+  }
+  return enqueue(async () => {
+    const campaign = await getCampaign(id);
+    if (!campaign) return { ok: false, error: 'Campaign not found' };
+    const result = await mutate(campaign);
+    if (result && result.ok) {
+      await fs.mkdir(CAMPAIGN_DIR, { recursive: true });
+      const tmp = campaignFile(campaign.id) + '.tmp';
+      await fs.writeFile(tmp, JSON.stringify(campaign, null, 2), 'utf8');
+      await fs.rename(tmp, campaignFile(campaign.id));
+    }
+    return result;
+  });
+}
+
+// ── Domain logic ───────────────────────────────────────────────────────────
 
 /**
  * Create a campaign from a snapshot.
@@ -79,6 +150,7 @@ function buildCampaign({ name, scope, dueDate, recurrence, createdBy, snapshot }
 
   return {
     id: newCampaignId(),
+    teamId: getCurrentTeamId(),
     name: String(name).slice(0, 120),
     scope,
     dueDate,                    // 'YYYY-MM-DD'
@@ -114,7 +186,7 @@ async function createCampaign(opts) {
 }
 
 /**
- * F-005: record one membership decision. Persists to the campaign file AND
+ * F-005: record one membership decision. Persists to the campaign store AND
  * the tamper-evident audit chain. Returns {ok, campaign, error}.
  * Authorization: reviewer must be the channel's assigned reviewer or a
  * workspace admin (checked by the caller via isWorkspaceAdmin — this module
@@ -123,9 +195,7 @@ async function createCampaign(opts) {
 async function recordDecision({ campaignId, channelId, targetUserId, decision, reviewer, justification, reviewerIsAdmin = false }) {
   if (!['keep', 'remove', 'flag'].includes(decision)) return { ok: false, error: 'Invalid decision' };
 
-  const result = await enqueue(async () => {
-    const campaign = await getCampaign(campaignId);
-    if (!campaign) return { ok: false, error: 'Campaign not found' };
+  const result = await mutateCampaign(campaignId, campaign => {
     if (campaign.status !== 'active') return { ok: false, error: 'Campaign is closed' };
     const ch = campaign.channels.find(c => c.id === channelId);
     if (!ch) return { ok: false, error: 'Channel not in campaign' };
@@ -146,11 +216,6 @@ async function recordDecision({ campaignId, channelId, targetUserId, decision, r
       campaign.status = 'completed';
       campaign.closedAt = new Date().toISOString();
     }
-
-    const tmp = campaignFile(campaign.id) + '.tmp';
-    await fs.mkdir(CAMPAIGN_DIR, { recursive: true });
-    await fs.writeFile(tmp, JSON.stringify(campaign, null, 2), 'utf8');
-    await fs.rename(tmp, campaignFile(campaign.id));
     return { ok: true, campaign, channel: ch };
   });
 
@@ -187,7 +252,7 @@ function campaignProgress(campaign) {
 /**
  * F-003 recurrence: for each completed (or overdue) recurring campaign that
  * hasn't spawned a successor yet, mark it and return it so the caller can
- * launch the next occurrence with a fresh snapshot.
+ * launch the next occurrence with a fresh snapshot. Team-scoped.
  */
 async function findCampaignsNeedingRecurrence() {
   const all = await listCampaigns();
@@ -205,14 +270,10 @@ function nextDueDate(dueDate, recurrence) {
 }
 
 async function markRecurrenceSpawned(id) {
-  return enqueue(async () => {
-    const c = await getCampaign(id);
-    if (!c) return;
+  return mutateCampaign(id, c => {
     c.nextSpawned = true;
     if (c.status === 'active') { c.status = 'expired'; c.closedAt = new Date().toISOString(); }
-    const tmp = campaignFile(c.id) + '.tmp';
-    await fs.writeFile(tmp, JSON.stringify(c, null, 2), 'utf8');
-    await fs.rename(tmp, campaignFile(c.id));
+    return { ok: true };
   });
 }
 

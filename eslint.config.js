@@ -14,7 +14,10 @@ module.exports = [
         require: 'readonly',
         __dirname: 'readonly',
         fetch: 'readonly',
-        setImmediate: 'readonly'
+        setImmediate: 'readonly',
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+        URLSearchParams: 'readonly'
       }
     },
     rules: {

@@ -67,6 +67,7 @@ users:read
 users:read.email
 chat:write
 im:write
+files:write
 ```
 
 ### 4. Enable Events
@@ -76,6 +77,8 @@ im:write
 3. Request URL: `https://your-domain.com/slack/events`
 4. Subscribe to bot events:
    - `app_home_opened`
+   - `app_uninstalled` (multi-workspace mode: cleans up that workspace's token + data)
+   - `tokens_revoked`
 
 ### 5. Enable Interactivity
 
@@ -91,9 +94,20 @@ im:write
 
 ### 7. Install App to Workspace
 
+**Single workspace (legacy):**
 1. Go to "Install App"
 2. Click "Install to Workspace"
-3. Copy the "Bot User OAuth Token"
+3. Copy the "Bot User OAuth Token" → `SLACK_BOT_TOKEN`
+
+**Multi-workspace public distribution (OAuth):**
+1. Basic Information → App Credentials → copy Client ID + Client Secret → `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`
+2. OAuth & Permissions → Redirect URLs → add `https://your-domain.com/slack/oauth/callback`
+3. Set `DATABASE_URL`, `TOKEN_ENCRYPTION_KEY`, `PUBLIC_BASE_URL` (see `.env.example` / `render.yaml`)
+4. Manage Distribution → complete the checklist → **Activate Public Distribution**
+5. Share the install link: `https://your-domain.com/slack/install` — any workspace can now install.
+   Per-workspace bot tokens are stored AES-256-GCM-encrypted in Postgres; campaigns and the
+   tamper-evident audit chain are stored per `team_id`. No messages or live workspace data are
+   ever persisted — snapshots are fetched from Slack's API on demand.
 
 ### 8. Setup Environment
 

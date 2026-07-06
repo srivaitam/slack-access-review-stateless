@@ -1,4 +1,4 @@
-const { slack } = require('../slack/client');
+const { slack, getCurrentTeamId } = require('../slack/client');
 const { limiters } = require('../slack/rateLimiter');
 const { logAuditEvent, hasCompletedRevocation } = require('./auditService');
 const { sendRevocationNotification } = require('./notificationService');
@@ -30,7 +30,8 @@ async function revokeUserAccess({ userId, userName, userEmail, channelIds, reaso
   }
 
   // Idempotency: if this exact request was already processed in-process, skip it.
-  if (_seen(idempotencyKey)) {
+  // Key is namespaced per workspace so teams can never collide.
+  if (_seen(idempotencyKey && getCurrentTeamId() + ':' + idempotencyKey)) {
     console.warn('[REVOKE] Duplicate suppressed for key=' + idempotencyKey);
     results.skipped = true;
     return results;

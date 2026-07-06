@@ -4,15 +4,19 @@ const { getAllChannels } = require('../slack/channels');
 const { getChannelMembers } = require('../slack/channelMembers');
 const { calculateChannelRisk, calculateUserRiskScore } = require('./riskScoringService');
 const { logInfo } = require('../utils/logger');
+const { getCurrentTeamId } = require('../slack/client');
 
 // Short-TTL in-memory snapshot cache (H2): reuse a recent scan across the
 // dashboard, detail modal, and exports instead of re-scanning on every click.
+// Keyed per workspace — one installing team must never see another's snapshot.
 const SNAPSHOT_TTL_MS = Number(process.env.SNAPSHOT_TTL_MS || 60000);
-let _cache = { at: 0, snapshot: null };
+const _caches = new Map(); // teamId -> { at, snapshot }
 
 async function generateAccessSnapshot(options = {}) {
   const startTime = Date.now();
   const { onProgress, force = false } = options;
+  const teamId = getCurrentTeamId();
+  const _cache = _caches.get(teamId) || { at: 0, snapshot: null };
 
   if (!force && _cache.snapshot && (Date.now() - _cache.at) < SNAPSHOT_TTL_MS) {
     if (onProgress) onProgress(100, 'Loaded from recent cache');
@@ -72,7 +76,7 @@ async function generateAccessSnapshot(options = {}) {
       durationMs: duration
     }
   };
-  _cache = { at: Date.now(), snapshot };
+  _caches.set(teamId, { at: Date.now(), snapshot });
   return snapshot;
 }
 
@@ -115,7 +119,7 @@ function buildUserAccessMap(channelData, userMap) {
 
 // Clear the cached snapshot so the next read re-scans (R1: call after a revoke).
 function invalidateSnapshotCache() {
-  _cache = { at: 0, snapshot: null };
+  _caches.delete(getCurrentTeamId());
 }
 
 module.exports = { generateAccessSnapshot, buildUserAccessMap, invalidateSnapshotCache };

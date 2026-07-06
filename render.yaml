@@ -1,11 +1,21 @@
-# Render Blueprint for the Slack Access Review app.
-# One Node web service + a small persistent disk for the audit log.
-# No database or Redis is required.
+# Render Blueprint for the Slack Access Review app — multi-workspace (public
+# distribution) mode: one Node web service + one Postgres database.
+# Postgres holds per-workspace OAuth tokens (encrypted), campaigns/decisions,
+# and the tamper-evident audit chain. No Redis needed (OAuth state is a
+# signed, self-contained value).
 #
 # To use: commit this file to your repo, then in Render click
 #   New +  →  Blueprint  →  pick this repo.
-# Render reads this file and creates the service. You'll be prompted to fill
-# in the two secret values marked `sync: false` (bot token + signing secret).
+# You'll be prompted for the values marked `sync: false`
+# (Slack client id/secret + signing secret — from api.slack.com/apps).
+#
+# After deploy, your public install link is:
+#   https://<service>.onrender.com/slack/install
+
+databases:
+  - name: slack-access-review-db
+    plan: basic-256mb        # smallest paid Postgres; upgrade as installs grow
+    region: oregon           # keep in the same region as the web service
 
 services:
   - type: web
@@ -18,24 +28,32 @@ services:
     healthCheckPath: /health
     autoDeploy: true         # redeploy automatically on every git push
 
-    # Keeps the audit log across deploys/restarts (Render's normal disk is wiped each deploy).
-    disk:
-      name: audit-logs
-      mountPath: /var/data
-      sizeGB: 1
-
     envVars:
       - key: NODE_ENV
         value: production
-      - key: AUDIT_LOG_DIR
-        value: /var/data/audit-logs      # write the audit log onto the persistent disk
+      - key: DATABASE_URL
+        fromDatabase:
+          name: slack-access-review-db
+          property: connectionString
       - key: AUDIT_HMAC_SECRET
         generateValue: true              # Render generates a strong random secret for you
-      - key: SLACK_BOT_TOKEN
-        sync: false                      # you paste this in the dashboard (never commit it)
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true              # encrypts workspace bot tokens at rest (AES-256-GCM)
+      - key: SLACK_CLIENT_ID
+        sync: false                      # api.slack.com/apps → Basic Information → App Credentials
+      - key: SLACK_CLIENT_SECRET
+        sync: false
       - key: SLACK_SIGNING_SECRET
-        sync: false                      # you paste this in the dashboard (never commit it)
-      # ---- optional tuning (safe to leave unset) ----
+        sync: false
+      # Public base URL used to build the OAuth redirect URI. Set this to your
+      # Render URL (or custom domain) — must match the Redirect URL configured
+      # in Slack under OAuth & Permissions.
+      - key: PUBLIC_BASE_URL
+        sync: false                      # e.g. https://slack-access-review.onrender.com
+      # ---- optional / legacy ----
+      # Single-workspace fallback token (not needed once OAuth is enabled):
+      # - key: SLACK_BOT_TOKEN
+      #   sync: false
       # - key: INTERNAL_EMAIL_DOMAINS
       #   value: yourcompany.com
       # - key: AUDIT_WEBHOOK_URL
