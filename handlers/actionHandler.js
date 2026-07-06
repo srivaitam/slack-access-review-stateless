@@ -13,7 +13,13 @@ const { markDecisionInMessage, notifyCampaignComplete } = require('../services/r
 
 async function handleAction(payload) {
   const userId = payload.user.id;
-  const action = payload.actions[0].action_id;
+  let action = payload.actions[0].action_id;
+
+  // Export overflow menu: dispatch to the underlying export action.
+  if (action === 'export_menu') {
+    action = payload.actions[0].selected_option?.value;
+    if (!action) return;
+  }
 
   // F-004/F-005: reviewer decisions are NOT admin-only (channel owners review
   // their own channels) — campaignService enforces assigned-reviewer identity.
@@ -25,7 +31,8 @@ async function handleAction(payload) {
   // require an owner/admin. (view_user_detail keeps its own inline modal check.)
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
-    'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign'
+    'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
+    'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -47,6 +54,29 @@ async function handleAction(payload) {
       await slack.views.publish({
         user_id: userId,
         view: buildAccessOverviewView(snapshot, 'riskScore', campaigns)
+      });
+    }
+
+    // ─── Sort selector on home tab ───
+    if (action === 'sort_users') {
+      const sortBy = payload.actions[0].selected_option?.value || 'riskScore';
+      const snapshot = await generateAccessSnapshot();
+      const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      await slack.views.publish({
+        user_id: userId,
+        view: buildAccessOverviewView(snapshot, sortBy, campaigns)
+      });
+    }
+
+    // ─── Show/hide deactivated members on home tab ───
+    if (action === 'toggle_deactivated') {
+      let state = { show: true, sortBy: 'riskScore' };
+      try { state = JSON.parse(payload.actions[0].value); } catch (e) { /* defaults */ }
+      const snapshot = await generateAccessSnapshot();
+      const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      await slack.views.publish({
+        user_id: userId,
+        view: buildAccessOverviewView(snapshot, state.sortBy, campaigns, { showDeactivated: state.show })
       });
     }
 
