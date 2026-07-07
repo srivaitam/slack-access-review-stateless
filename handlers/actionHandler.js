@@ -2,6 +2,7 @@ const { slack } = require('../slack/client');
 const { generateAccessSnapshot } = require('../services/accessService');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
+const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
 const { buildLoadingView } = require('../views/loadingView');
 const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
@@ -39,7 +40,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'sort_users', 'toggle_deactivated'
+    'open_revoke_modal', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -126,6 +127,11 @@ async function handleAction(payload) {
     // ─── F-003: create review campaign ───
     if (action === 'create_campaign') {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
+    }
+
+    // ─── F-007: multi-channel revoke — open the picker modal ───
+    if (action === 'open_revoke_modal') {
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildRevokeAccessModal() });
     }
 
     // ─── Export CSV ───

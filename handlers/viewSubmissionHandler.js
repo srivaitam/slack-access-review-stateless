@@ -8,7 +8,20 @@ const { generateMembershipCSV } = require('../services/exportService');
 const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
+const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
 const crypto = require('crypto');
+
+// Reliably DM a user: open the IM channel first, then post. Posting to a raw
+// user id (channel: 'Uxxxx') can silently fail depending on install state,
+// which shows up as "nothing happens". Opening the conversation is reliable.
+async function dmUser(userId, message) {
+  try {
+    const dm = await slack.conversations.open({ users: userId });
+    await slack.chat.postMessage({ channel: dm.channel.id, ...message });
+  } catch (e) {
+    console.error('[DM] failed to message ' + userId + ':', e.message);
+  }
+}
 
 async function handleViewSubmission(payload) {
   const callbackId = payload.view.callback_id;
@@ -17,7 +30,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -98,6 +111,91 @@ async function handleViewSubmission(payload) {
         slack.chat.postMessage({ channel: adminId, text: '❌ Channel audit export failed. Please try again.' }).catch(() => {});
       }
     });
+    return { response_action: 'clear' };
+  }
+
+  // F-007: multi-channel revoke from the dedicated modal (admin-only, gated above).
+  if (callbackId === 'revoke_access_modal') {
+    const v = payload.view.state.values;
+    const targetUserId = v.revoke_user?.user?.selected_user;
+    const channelIds = v.revoke_channels?.channels?.selected_conversations || [];
+    const reason = (v.revoke_reason?.reason?.value || '').trim();
+    const notifyUser = (v.revoke_notify?.notify?.selected_options?.length || 0) > 0;
+
+    const errors = {};
+    if (!targetUserId) errors.revoke_user = 'Select a user to revoke.';
+    if (channelIds.length === 0) errors.revoke_channels = 'Select at least one channel.';
+    if (reason.length < 10) errors.revoke_reason = 'Please give a reason of at least 10 characters.';
+    if (Object.keys(errors).length > 0) return { response_action: 'errors', errors };
+
+    const adminInfo = await slack.users.info({ user: adminId });
+    const revokedBy = {
+      id: adminId,
+      name: adminInfo.user.profile.real_name || adminInfo.user.name,
+      email: adminInfo.user.profile.email || 'unknown'
+    };
+
+    let target = { name: targetUserId, email: 'unknown' };
+    try {
+      const t = await slack.users.info({ user: targetUserId });
+      target = { name: t.user.profile.real_name || t.user.name, email: t.user.profile.email || 'unknown' };
+    } catch (e) { /* fall back to the id */ }
+
+    const idempotencyKey = crypto.createHash('sha256')
+      .update([adminId, targetUserId, [...channelIds].sort().join(','), reason].join('|'))
+      .digest('hex');
+
+    try {
+      await logAuditEvent({
+        action: 'ACCESS_REVOCATION_INITIATED',
+        actor: revokedBy,
+        target: { userId: targetUserId, userName: target.name, userEmail: target.email, channelIds },
+        result: { channels: channelIds.length },
+        reason,
+        metadata: { idempotencyKey, via: 'multi_channel_modal' }
+      });
+    } catch (e) {
+      console.error('[REVOKE] initiation audit failed:', e.message);
+    }
+
+    setImmediate(async () => {
+      await dmUser(adminId, { text: `⏳ Revoking ${target.name} from ${channelIds.length} channel(s)…` });
+      try {
+        const results = await revokeUserAccess({
+          userId: targetUserId, userName: target.name, userEmail: target.email,
+          channelIds, reason, revokedBy, notifyUser, idempotencyKey
+        });
+        if (results.skipped) {
+          await dmUser(adminId, { text: 'ℹ️ That revocation was already processed moments ago — no duplicate action taken.' });
+          return;
+        }
+        const ok = results.successful.length;
+        const bad = results.failed.length;
+        const emoji = bad === 0 ? '✅' : (ok > 0 ? '⚠️' : '❌');
+        const failDetail = bad > 0
+          ? '\n*Failed (' + bad + '):*\n' + results.failed.map(f => '• <#' + f.channelId + '>: ' + f.error).join('\n')
+          : '';
+        await dmUser(adminId, {
+          text: emoji + ' Revocation for ' + target.name + ': ' + ok + ' succeeded, ' + bad + ' failed.',
+          blocks: [{
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: emoji + ' *Revocation ' + (bad === 0 ? 'complete' : 'partly complete') + '*\n\n' +
+                '*User:* ' + target.name + '\n' +
+                '*Removed from:* ' + ok + ' channel(s)\n' +
+                (bad > 0 ? '*Failed:* ' + bad + ' channel(s)' + failDetail + '\n' : '') +
+                '*Reason:* ' + reason + '\n' +
+                '*Audit ID:* ' + (results.auditId || 'N/A')
+            }
+          }]
+        });
+      } catch (err) {
+        console.error('[REVOKE] multi-channel background error:', err.message);
+        await dmUser(adminId, { text: '❌ Revocation for ' + target.name + ' failed: ' + err.message });
+      }
+    });
+
     return { response_action: 'clear' };
   }
 
@@ -292,65 +390,53 @@ async function handleViewSubmission(payload) {
       console.error('[REVOKE] initiation audit failed:', e.message);
     }
 
-    // Fire in background AFTER responding
-    setImmediate(() => {
-      revokeUserAccess({
-        userId: metadata.userId,
-        userName: metadata.userName,
-        userEmail: metadata.userEmail,
-        channelIds: metadata.channelIds,
-        reason: reason.trim(),
-        revokedBy,
-        notifyUser,
-        idempotencyKey
-      }).then(results => {
+    // Fire in background AFTER responding. Always DM the admin so the action is
+    // never silent: a progress note first, then a success/failure summary.
+    setImmediate(async () => {
+      await dmUser(adminId, { text: `⏳ Revoking ${metadata.userName} from ${metadata.channelIds.length} channel(s)…` });
+      try {
+        const results = await revokeUserAccess({
+          userId: metadata.userId,
+          userName: metadata.userName,
+          userEmail: metadata.userEmail,
+          channelIds: metadata.channelIds,
+          reason: reason.trim(),
+          revokedBy,
+          notifyUser,
+          idempotencyKey
+        });
+
         if (results.skipped) {
-          slack.chat.postMessage({
-            channel: adminId,
-            text: 'ℹ️ That revocation was already processed moments ago — no duplicate action taken.'
-          }).catch(() => {});
+          await dmUser(adminId, { text: 'ℹ️ That revocation was already processed moments ago — no duplicate action taken.' });
           return;
         }
+
         const successCount = results.successful.length;
         const failCount = results.failed.length;
         const statusEmoji = failCount === 0 ? '✅' : (successCount > 0 ? '⚠️' : '❌');
+        const failDetail = failCount > 0
+          ? '\n*Failed (' + failCount + '):*\n' + results.failed.map(f => '• <#' + f.channelId + '>: ' + f.error).join('\n')
+          : '';
 
-        // Build failure detail if any
-        let failDetail = '';
-        if (failCount > 0) {
-          failDetail = '\n*Failed (' + failCount + '):*\n' +
-            results.failed.map(f => '• ' + f.channelId + ': ' + f.error).join('\n');
-        }
-
-        const summaryText = statusEmoji + ' Revocation for ' + metadata.userName + ': ' +
-          successCount + ' succeeded, ' + failCount + ' failed.';
-
-        slack.chat.postMessage({
-          channel: adminId,
-          text: summaryText,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: statusEmoji + ' *Revocation Complete*\n\n' +
-                  '*User:* ' + metadata.userName + '\n' +
-                  '*Removed from:* ' + successCount + ' channel(s)\n' +
-                  (failCount > 0 ? '*Failed:* ' + failCount + ' channel(s)' + failDetail + '\n' : '') +
-                  '*Reason:* ' + reason.trim() + '\n' +
-                  '*Audit ID:* ' + (results.auditId || 'N/A')
-              }
+        await dmUser(adminId, {
+          text: statusEmoji + ' Revocation for ' + metadata.userName + ': ' + successCount + ' succeeded, ' + failCount + ' failed.',
+          blocks: [{
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: statusEmoji + ' *Revocation ' + (failCount === 0 ? 'complete' : 'partly complete') + '*\n\n' +
+                '*User:* ' + metadata.userName + '\n' +
+                '*Removed from:* ' + successCount + ' channel(s)\n' +
+                (failCount > 0 ? '*Failed:* ' + failCount + ' channel(s)' + failDetail + '\n' : '') +
+                '*Reason:* ' + reason.trim() + '\n' +
+                '*Audit ID:* ' + (results.auditId || 'N/A')
             }
-          ]
-        }).catch(e => console.error('[DM] Error:', e.message));
-
-      }).catch(err => {
+          }]
+        });
+      } catch (err) {
         console.error('[REVOKE] Background error:', err.message);
-        slack.chat.postMessage({
-          channel: adminId,
-          text: '❌ Revocation failed for ' + metadata.userName + ': ' + err.message
-        }).catch(() => {});
-      });
+        await dmUser(adminId, { text: '❌ Revocation failed for ' + metadata.userName + ': ' + err.message });
+      }
     });
 
     return { response_action: 'clear' };
