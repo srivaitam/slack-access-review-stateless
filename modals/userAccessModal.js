@@ -1,6 +1,7 @@
 const { getRiskEmoji, getRiskLevel } = require('../services/riskScoringService');
 
-function buildUserAccessModal(userAccess) {
+function buildUserAccessModal(userAccess, opts = {}) {
+  const canRevoke = opts.canRevoke !== false; // F-008: default true; false → read-only view
   const { user, channels, publicChannels, privateChannels, highRiskChannels, aggregateRiskScore } = userAccess;
 
   // Sort: high risk first, then private, then alphabetical
@@ -52,6 +53,34 @@ function buildUserAccessModal(userAccess) {
       type: 'section',
       text: { type: 'mrkdwn', text: '_This user has no accessible channel memberships._' }
     });
+    return {
+      type: 'modal',
+      callback_id: 'user_access_modal',
+      title: { type: 'plain_text', text: 'User Access Detail' },
+      close: { type: 'plain_text', text: 'Close' },
+      private_metadata: privateMetadata,
+      blocks
+    };
+  }
+
+  // F-008: read-only view when revocation isn't available on this plan.
+  if (!canRevoke) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '*Channel memberships* (read-only)' } });
+    sortedChannels.slice(0, 40).forEach(ch => {
+      blocks.push({
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: (ch.is_private ? '🔒' : '🔓') + ' *#' + ch.name + '*' +
+            (ch.riskScore > 0 ? ' · risk ' + ch.riskScore + ' ' + getRiskEmoji(ch.riskScore) : '')
+        }]
+      });
+    });
+    if (sortedChannels.length > 40) {
+      blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `…and ${sortedChannels.length - 40} more. Use the Channel audit CSV for the full list.` }] });
+    }
+    blocks.push({ type: 'divider' });
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: '🔒 Revocation requires Business+ or Enterprise Grid. This is a read-only view on your current plan.' }] });
     return {
       type: 'modal',
       callback_id: 'user_access_modal',

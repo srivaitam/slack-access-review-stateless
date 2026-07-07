@@ -60,6 +60,7 @@ function userRow(userAccess) {
 function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [], opts = {}) {
   const { userAccessMap, metadata } = snapshot;
   const showDeactivated = Boolean(opts.showDeactivated);
+  const plan = opts.plan || {}; // { label, canRevoke, ... } from planService
   const userAccessArray = sortUsers(Array.from(userAccessMap.values()), sortBy);
 
   const people = userAccessArray.map(ua => ua.user);
@@ -97,6 +98,10 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
           (metadata.erroredChannels > 0
             ? ` · ⚠️ ${metadata.erroredChannels} channel(s) unreadable — data may be incomplete`
             : '')
+      }, {
+        type: 'mrkdwn',
+        text: `🏷️ Plan: *${plan.label || 'Unknown'}*` +
+          (plan.canRevoke ? '' : ' · _revocation requires Business+ or Enterprise Grid_')
       }]
     },
     {
@@ -111,7 +116,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
         },
         { type: 'button', text: { type: 'plain_text', text: 'Browse channels' }, action_id: 'browse_channels' },
         { type: 'button', text: { type: 'plain_text', text: 'New review campaign' }, action_id: 'create_campaign' },
-        { type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' },
+        ...(plan.canRevoke ? [{ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' }] : []),
         {
           type: 'overflow',
           action_id: 'export_menu',

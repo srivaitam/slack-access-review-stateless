@@ -12,7 +12,8 @@ const { invalidateTeamClient } = require('./client');
 // Must match the Bot Token Scopes configured at api.slack.com (README §Scopes).
 const DEFAULT_SCOPES = [
   'channels:read', 'channels:manage', 'channels:join', 'groups:read', 'groups:write',
-  'users:read', 'users:read.email', 'chat:write', 'im:write', 'files:write'
+  'users:read', 'users:read.email', 'chat:write', 'im:write', 'files:write',
+  'team.billing:read'
 ].join(',');
 
 const STATE_TTL_MS = 10 * 60 * 1000;

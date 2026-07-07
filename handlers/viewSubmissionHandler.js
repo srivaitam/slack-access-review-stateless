@@ -9,7 +9,24 @@ const { createCampaign, recordDecision, recordDecisions, getCampaign } = require
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
+const { getWorkspacePlan } = require('../services/planService');
 const crypto = require('crypto');
+
+// F-008: shown when someone reaches a revoke submission on a plan that can't revoke.
+function planBlockedView() {
+  return {
+    response_action: 'update',
+    view: {
+      type: 'modal',
+      title: { type: 'plain_text', text: 'Revocation unavailable' },
+      close: { type: 'plain_text', text: 'Close' },
+      blocks: [{
+        type: 'section',
+        text: { type: 'mrkdwn', text: '🔒 *Revocation requires Business+ or Enterprise Grid.*\n\nOn Free/Pro, Slack restricts removing members from channels, so this action is disabled here. Your current plan is shown on the dashboard.' }
+      }]
+    }
+  };
+}
 
 // Reliably DM a user: open the IM channel first, then post. Posting to a raw
 // user id (channel: 'Uxxxx') can silently fail depending on install state,
@@ -116,6 +133,8 @@ async function handleViewSubmission(payload) {
 
   // F-007: multi-channel revoke from the dedicated modal (admin-only, gated above).
   if (callbackId === 'revoke_access_modal') {
+    const plan = await getWorkspacePlan().catch(() => ({}));
+    if (!plan.canRevoke) return planBlockedView();
     const v = payload.view.state.values;
     const targetUserId = v.revoke_user?.user?.selected_user;
     const channelIds = v.revoke_channels?.channels?.selected_conversations || [];
@@ -350,6 +369,8 @@ async function handleViewSubmission(payload) {
 
   // Step 2: Admin confirmed
   if (callbackId === 'confirm_revocation') {
+    const plan = await getWorkspacePlan().catch(() => ({}));
+    if (!plan.canRevoke) return planBlockedView();
     const metadata = JSON.parse(payload.view.private_metadata);
     const values = payload.view.state.values;
     const reason = values.revocation_reason?.reason_input?.value || '';

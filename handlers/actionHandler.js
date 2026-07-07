@@ -3,6 +3,7 @@ const { generateAccessSnapshot } = require('../services/accessService');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
+const { getWorkspacePlan } = require('../services/planService');
 const { buildLoadingView } = require('../views/loadingView');
 const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
@@ -59,9 +60,10 @@ async function handleAction(payload) {
       });
       const snapshot = await generateAccessSnapshot({ force: true });
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      const plan = await getWorkspacePlan().catch(() => ({}));
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns)
+        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan })
       });
     }
 
@@ -70,9 +72,10 @@ async function handleAction(payload) {
       const sortBy = payload.actions[0].selected_option?.value || 'riskScore';
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      const plan = await getWorkspacePlan().catch(() => ({}));
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, sortBy, campaigns)
+        view: buildAccessOverviewView(snapshot, sortBy, campaigns, { plan })
       });
     }
 
@@ -82,9 +85,10 @@ async function handleAction(payload) {
       try { state = JSON.parse(payload.actions[0].value); } catch (e) { /* defaults */ }
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      const plan = await getWorkspacePlan().catch(() => ({}));
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, state.sortBy, campaigns, { showDeactivated: state.show })
+        view: buildAccessOverviewView(snapshot, state.sortBy, campaigns, { showDeactivated: state.show, plan })
       });
     }
 
@@ -129,8 +133,16 @@ async function handleAction(payload) {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
     }
 
-    // ─── F-007: multi-channel revoke — open the picker modal ───
+    // ─── F-007/F-008: multi-channel revoke — plan-gated, then open the modal ───
     if (action === 'open_revoke_modal') {
+      const plan = await getWorkspacePlan().catch(() => ({}));
+      if (!plan.canRevoke) {
+        await slack.chat.postMessage({
+          channel: userId,
+          text: `🔒 Revocation isn't available on your plan (*${plan.label || 'Unknown'}*). It requires Business+ or Enterprise Grid, where Slack lets an app remove channel members.`
+        }).catch(() => {});
+        return;
+      }
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildRevokeAccessModal() });
     }
 
@@ -205,9 +217,10 @@ async function handleAction(payload) {
       const userAccess = snapshot.userAccessMap.get(targetUserId);
 
       if (userAccess) {
+        const plan = await getWorkspacePlan().catch(() => ({}));
         await slack.views.open({
           trigger_id: payload.trigger_id,
-          view: buildUserAccessModal(userAccess)
+          view: buildUserAccessModal(userAccess, { canRevoke: Boolean(plan.canRevoke) })
         });
       }
     }

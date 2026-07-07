@@ -65,7 +65,7 @@ async function revokeUserAccess({ userId, userName, userEmail, channelIds, reaso
         if (errCode === 'not_in_channel') friendlyError = 'Bot could not join channel';
         if (errCode === 'channel_not_found') friendlyError = 'Channel not found or bot has no access';
         if (errCode === 'missing_scope') friendlyError = 'Bot missing required permission scope';
-        if (errCode === 'restricted_action') friendlyError = 'Action restricted by workspace settings';
+        if (errCode === 'restricted_action') friendlyError = 'Blocked by a workspace setting — an Owner must allow member removal at Settings → Permissions → Channel Management → "People who can remove members from public channels" (set to "Everyone, except guests").';
 
         results.failed.push({ channelId, error: friendlyError });
         return { channelId, status: 'failed', error: friendlyError };
