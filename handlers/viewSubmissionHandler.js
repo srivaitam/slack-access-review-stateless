@@ -4,8 +4,9 @@ const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
 const { generateAccessSnapshot } = require('../services/accessService');
-const { createCampaign, recordDecision } = require('../services/campaignService');
+const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
+const { buildReviewRosterView } = require('../views/reviewHomeView');
 const crypto = require('crypto');
 
 async function handleViewSubmission(payload) {
@@ -116,6 +117,58 @@ async function handleViewSubmission(payload) {
         if (result.campaign.status === 'completed') await notifyCampaignComplete(result.campaign);
       } catch (e) {
         console.error('[REVIEW] post-decision update failed:', e.message);
+      }
+    });
+
+    return { response_action: 'clear' };
+  }
+
+  // F-006: one justification applied to a batch of Remove/Flag decisions made
+  // from the App Home roster. Republishes the roster where the reviewer left off.
+  if (callbackId === 'review_bulk_justification_modal') {
+    const meta = JSON.parse(payload.view.private_metadata);
+    const justification = payload.view.state.values.justification?.justification_input?.value?.trim();
+    if (!justification || justification.length < 10) {
+      return { response_action: 'errors', errors: { justification: 'Please provide a justification of at least 10 characters.' } };
+    }
+
+    const info = await slack.users.info({ user: adminId });
+    const reviewer = {
+      id: adminId,
+      name: info.user.profile.real_name || info.user.name,
+      email: info.user.profile.email || 'unknown'
+    };
+    const reviewerIsAdmin = Boolean(info.user.is_owner || info.user.is_admin);
+
+    const result = await recordDecisions({
+      campaignId: meta.campaignId,
+      channelId: meta.channelId,
+      decisions: (meta.userIds || []).map(uid => ({ targetUserId: uid, decision: meta.decision, justification })),
+      reviewer,
+      reviewerIsAdmin
+    });
+
+    if (!result.ok) {
+      return { response_action: 'errors', errors: { justification: 'Could not record: ' + result.error } };
+    }
+
+    // Republish the roster (and send completion notice) in the background.
+    setImmediate(async () => {
+      try {
+        const fresh = await getCampaign(meta.campaignId);
+        const freshCh = fresh && fresh.channels.find(c => c.id === meta.channelId);
+        if (freshCh) {
+          await slack.views.publish({
+            user_id: adminId,
+            view: buildReviewRosterView({
+              campaign: fresh, channel: freshCh, userId: adminId, isAdmin: reviewerIsAdmin,
+              page: meta.page, pageSize: meta.pageSize, filter: meta.filter
+            })
+          });
+        }
+        if (fresh && fresh.status === 'completed') await notifyCampaignComplete(fresh);
+      } catch (e) {
+        console.error('[REVIEW] bulk republish failed:', e.message);
       }
     });
 

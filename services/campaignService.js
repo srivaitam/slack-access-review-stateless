@@ -233,6 +233,64 @@ async function recordDecision({ campaignId, channelId, targetUserId, decision, r
   return result;
 }
 
+/**
+ * F-005 (bulk): record MANY membership decisions for one channel in a single
+ * atomic mutateCampaign, then chain each into the audit log. Same authorization
+ * as recordDecision (assigned reviewer or admin). Invalid rows are skipped and
+ * returned in `errors`; at least one valid decision must apply.
+ * Returns {ok, campaign, applied:[{targetUserId,decision}], errors:[...]}.
+ */
+async function recordDecisions({ campaignId, channelId, decisions, reviewer, reviewerIsAdmin = false }) {
+  if (!Array.isArray(decisions) || decisions.length === 0) return { ok: false, error: 'No decisions provided' };
+
+  const applied = [];
+  const errors = [];
+
+  const result = await mutateCampaign(campaignId, campaign => {
+    if (campaign.status !== 'active') return { ok: false, error: 'Campaign is closed' };
+    const ch = campaign.channels.find(c => c.id === channelId);
+    if (!ch) return { ok: false, error: 'Channel not in campaign' };
+    if (ch.reviewerId !== reviewer.id && !reviewerIsAdmin) {
+      return { ok: false, error: 'Only the assigned reviewer (or an admin) can review this channel' };
+    }
+    const timestamp = new Date().toISOString();
+    for (const d of decisions) {
+      if (!['keep', 'remove', 'flag'].includes(d.decision)) { errors.push({ targetUserId: d.targetUserId, error: 'Invalid decision' }); continue; }
+      const member = ch.members.find(m => m.id === d.targetUserId);
+      if (!member) { errors.push({ targetUserId: d.targetUserId, error: 'User not in channel scope' }); continue; }
+      ch.decisions[d.targetUserId] = {
+        decision: d.decision,
+        reviewer: { id: reviewer.id, name: reviewer.name, email: reviewer.email },
+        timestamp,
+        justification: d.justification || null
+      };
+      applied.push({ targetUserId: d.targetUserId, decision: d.decision, justification: d.justification || null, member: { name: member.name, email: member.email } });
+    }
+    if (applied.length === 0) return { ok: false, error: (errors[0] && errors[0].error) || 'No valid decisions' };
+
+    // Auto-close when every member of every channel has a decision.
+    if (campaign.channels.every(c => c.members.every(m => c.decisions[m.id]))) {
+      campaign.status = 'completed';
+      campaign.closedAt = new Date().toISOString();
+    }
+    return { ok: true, campaign, channel: ch };
+  });
+
+  if (!result.ok) return { ok: false, error: result.error, errors };
+
+  for (const a of applied) {
+    await logAuditEvent({
+      action: 'REVIEW_DECISION',
+      actor: reviewer,
+      target: { userId: a.targetUserId, userName: a.member.name, userEmail: a.member.email, channelId, channelName: result.channel.name },
+      result: { decision: a.decision },
+      reason: a.justification || `Reviewer decision: ${a.decision}`,
+      metadata: { campaignId, bulk: true }
+    });
+  }
+  return { ok: true, campaign: result.campaign, applied, errors };
+}
+
 function campaignProgress(campaign) {
   let total = 0, decided = 0, removals = 0, flags = 0;
   for (const ch of campaign.channels) {
@@ -282,8 +340,10 @@ module.exports = {
   getCampaign,
   listCampaigns,
   recordDecision,
+  recordDecisions,
   campaignProgress,
   findCampaignsNeedingRecurrence,
   nextDueDate,
   markRecurrenceSpawned
 };
+// F-006: recordDecisions (batch) added for the App Home review flow.

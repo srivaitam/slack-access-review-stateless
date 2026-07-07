@@ -1,4 +1,4 @@
-const { slack } = require('../slack/client');
+const { slack, getCurrentTeamId } = require('../slack/client');
 const { getRiskEmoji } = require('./riskScoringService');
 const { campaignProgress } = require('./campaignService');
 
@@ -47,31 +47,88 @@ function memberBlock(campaign, ch, m) {
   };
 }
 
-function checklistMessages(campaign, ch) {
+function checklistMessages(campaign, ch, queueButton) {
   const messages = [];
   for (let i = 0; i < ch.members.length; i += MEMBERS_PER_MESSAGE) {
     const chunk = ch.members.slice(i, i + MEMBERS_PER_MESSAGE);
     const part = ch.members.length > MEMBERS_PER_MESSAGE
       ? ` (part ${Math.floor(i / MEMBERS_PER_MESSAGE) + 1}/${Math.ceil(ch.members.length / MEMBERS_PER_MESSAGE)})`
       : '';
+
+    const header = [{
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `📋 *Access review: <#${ch.id}>* ${getRiskEmoji(ch.riskScore)}${part}\n` +
+          `Campaign *${campaign.name}* · due *${campaign.dueDate}*\n` +
+          `You are the reviewer for this channel.`
+      }
+    }];
+
+    // F-006: one-click into the paginated review queue (part 1 only).
+    if (i === 0 && queueButton) {
+      header.push({ type: 'actions', elements: [queueButton] });
+      header.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: '*Recommended:* opens your queue in the app Home tab — filter, paginate, and Keep/Remove/Flag in bulk. Or decide each member below from the ⋯ menu (Remove/Flag asks for a justification).' }]
+      });
+    } else {
+      header.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: 'For each member choose *Keep*, *Remove*, or *Flag* from the ⋯ menu. Remove/Flag will ask for a justification.' }]
+      });
+    }
+
     messages.push({
       text: `Access review: #${ch.name} — ${ch.members.length} member(s) to review`,
       blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `📋 *Access review: <#${ch.id}>* ${getRiskEmoji(ch.riskScore)}${part}\n` +
-              `Campaign *${campaign.name}* · due *${campaign.dueDate}*\n` +
-              `You are the reviewer for this channel. For each member choose *Keep*, *Remove*, or *Flag* from the ⋯ menu. Remove/Flag will ask for a justification.`
-          }
-        },
+        ...header,
         { type: 'divider' },
         ...chunk.map(m => memberBlock(campaign, ch, m))
       ]
     });
   }
   return messages;
+}
+
+// F-006: resolve the App Home deep link (cached per workspace). SLACK_APP_ID
+// short-circuits the API lookup; otherwise derive the app id from the bot.
+const _appMetaCache = new Map();
+async function getAppMeta() {
+  const key = getCurrentTeamId();
+  if (_appMetaCache.has(key)) return _appMetaCache.get(key);
+  const meta = { teamId: null, appId: process.env.SLACK_APP_ID || null };
+  try {
+    const auth = await slack.auth.test();
+    meta.teamId = auth.team_id || null;
+    if (!meta.appId && auth.bot_id) {
+      const info = await slack.bots.info({ bot: auth.bot_id });
+      meta.appId = (info.bot && info.bot.app_id) || null;
+    }
+  } catch (e) {
+    console.error('[REVIEW] could not resolve app metadata for deep link:', e.message);
+  }
+  _appMetaCache.set(key, meta);
+  return meta;
+}
+
+/**
+ * Button that takes a reviewer straight to their queue. When team + app id are
+ * known it deep-links to the Home tab (url); otherwise it falls back to a plain
+ * action button that publishes the Home tab on click (the reviewer then opens
+ * the Home tab themselves).
+ */
+async function reviewQueueButton(campaignId) {
+  const { teamId, appId } = await getAppMeta();
+  const button = {
+    type: 'button',
+    text: { type: 'plain_text', text: '📋 Open my review queue' },
+    action_id: 'rev_open_index',
+    value: campaignId,
+    style: 'primary'
+  };
+  if (teamId && appId) button.url = `slack://app?team=${teamId}&id=${appId}&tab=home`;
+  return button;
 }
 
 /**
@@ -81,10 +138,11 @@ function checklistMessages(campaign, ch) {
 async function sendReviewChecklists(campaign) {
   let sent = 0;
   const failed = [];
+  const queueButton = await reviewQueueButton(campaign.id);
   for (const ch of campaign.channels) {
     try {
       const dm = await slack.conversations.open({ users: ch.reviewerId });
-      for (const msg of checklistMessages(campaign, ch)) {
+      for (const msg of checklistMessages(campaign, ch, queueButton)) {
         await slack.chat.postMessage({ channel: dm.channel.id, ...msg });
       }
       sent++;
@@ -135,4 +193,4 @@ async function notifyCampaignComplete(campaign) {
   }
 }
 
-module.exports = { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete, checklistMessages };
+module.exports = { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete, checklistMessages, reviewQueueButton };

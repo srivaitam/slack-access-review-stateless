@@ -8,8 +8,9 @@ const { isWorkspaceAdmin } = require('../utils/authz');
 const { getInternalDomains } = require('../services/riskScoringService');
 const { buildChannelBrowserModal, buildChannelMembersModal } = require('../views/channelBrowserModal');
 const { buildCampaignCreateModal } = require('../views/campaignModal');
-const { recordDecision, getCampaign, listCampaigns } = require('../services/campaignService');
+const { recordDecision, recordDecisions, getCampaign, listCampaigns } = require('../services/campaignService');
 const { markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
+const { buildReviewIndexView, buildReviewRosterView, buildBulkJustificationModal, filterRoster, isException } = require('../views/reviewHomeView');
 
 async function handleAction(payload) {
   const userId = payload.user.id;
@@ -25,6 +26,12 @@ async function handleAction(payload) {
   // their own channels) — campaignService enforces assigned-reviewer identity.
   if (action === 'review_decision') {
     return handleReviewDecision(payload);
+  }
+
+  // F-006: App Home review flow. Not admin-only — assigned reviewers act on
+  // their own channels; handleReviewHome re-checks reviewer/admin per channel.
+  if (action.startsWith('rev_')) {
+    return handleReviewHome(payload);
   }
 
   // Authorization (C3/M6): actions that expose or act on the whole workspace
@@ -306,6 +313,158 @@ async function handleReviewDecision(payload) {
   } catch (error) {
     console.error('Review decision error:', error.message);
     await slack.chat.postMessage({ channel: userId, text: '❌ Something went wrong recording that decision. Please try again.' }).catch(() => {});
+  }
+}
+
+// ─── F-006: App Home review flow (channel index + paginated roster) ─────────
+function safeMeta(str) {
+  try { return JSON.parse(str || '{}'); } catch (e) { return {}; }
+}
+
+function selectedUserIds(state) {
+  const ids = [];
+  if (!state || !state.values) return ids;
+  Object.values(state.values).forEach(block => {
+    Object.values(block).forEach(el => {
+      if (el && el.type === 'checkboxes' && Array.isArray(el.selected_options)) {
+        el.selected_options.forEach(o => ids.push(o.value));
+      }
+    });
+  });
+  return ids;
+}
+
+// Non-destructive error: DM the reviewer instead of clobbering their Home tab.
+async function reviewNotice(userId, text) {
+  await slack.chat.postMessage({ channel: userId, text }).catch(() => {});
+}
+
+async function maybeNotifyComplete(campaign) {
+  if (campaign && campaign.status === 'completed') {
+    await notifyCampaignComplete(campaign).catch(e => console.error('[REVIEW] completion notice failed:', e.message));
+  }
+}
+
+async function publishRoster(userId, campaignId, channelId, isAdmin, { page = 0, pageSize, filter = 'todo' } = {}) {
+  const campaign = await getCampaign(campaignId);
+  if (!campaign) return reviewNotice(userId, '⚠️ That campaign could not be found — it may have closed.');
+  const channel = campaign.channels.find(c => c.id === channelId);
+  if (!channel) return reviewNotice(userId, '⚠️ That channel is not part of the campaign.');
+  await slack.views.publish({
+    user_id: userId,
+    view: buildReviewRosterView({ campaign, channel, userId, isAdmin, page, pageSize, filter })
+  });
+}
+
+async function handleReviewHome(payload) {
+  const userId = payload.user.id;
+  const act = payload.actions[0];
+  const id = act.action_id;
+
+  // Checkbox ticks carry state only — nothing to do until a bulk button fires.
+  if (id.startsWith('rev_select_')) return;
+
+  try {
+    const info = await slack.users.info({ user: userId });
+    const reviewer = {
+      id: userId,
+      name: info.user.profile.real_name || info.user.name,
+      email: info.user.profile.email || 'unknown'
+    };
+    const isAdmin = Boolean(info.user.is_owner || info.user.is_admin);
+
+    // Back to the workspace dashboard (admin-gated view).
+    if (id === 'rev_back_dashboard') {
+      if (!isAdmin) return reviewNotice(userId, '🔒 Only workspace Owners and Admins can open the access dashboard.');
+      const snapshot = await generateAccessSnapshot();
+      const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+      await slack.views.publish({ user_id: userId, view: buildAccessOverviewView(snapshot, 'riskScore', campaigns) });
+      return;
+    }
+
+    // Open a campaign's channel index. value = campaignId.
+    if (id === 'rev_open_index') {
+      const campaign = await getCampaign(act.value);
+      if (!campaign) return reviewNotice(userId, '⚠️ That campaign could not be found — it may have closed.');
+      await slack.views.publish({ user_id: userId, view: buildReviewIndexView({ campaign, userId, isAdmin }) });
+      return;
+    }
+
+    // Channel-scoped actions. Context comes from the rev_open value or, for
+    // roster nav, from the home view's private_metadata.
+    let campaignId, channelId, page = 0, pageSize, filter = 'todo';
+    if (id === 'rev_open') {
+      [campaignId, channelId] = String(act.value).split('|');
+    } else {
+      const meta = safeMeta(payload.view && payload.view.private_metadata);
+      campaignId = meta.c; channelId = meta.ch; page = meta.p || 0; pageSize = meta.ps; filter = meta.f || 'todo';
+    }
+    if (!campaignId || !channelId) return reviewNotice(userId, '⚠️ Lost track of that review. Reopen it from the dashboard.');
+
+    const campaign = await getCampaign(campaignId);
+    if (!campaign) return reviewNotice(userId, '⚠️ That campaign could not be found — it may have closed.');
+    const channel = campaign.channels.find(c => c.id === channelId);
+    if (!channel) return reviewNotice(userId, '⚠️ That channel is not part of the campaign.');
+
+    // Authorization: assigned reviewer or workspace admin.
+    if (channel.reviewerId !== userId && !isAdmin) {
+      return reviewNotice(userId, '🚫 You are not the assigned reviewer for that channel.');
+    }
+
+    // Bulk decisions read the checkbox selection off the current view state.
+    if (id === 'rev_bulk_keep' || id === 'rev_bulk_remove' || id === 'rev_bulk_flag') {
+      const decision = id === 'rev_bulk_keep' ? 'keep' : id === 'rev_bulk_remove' ? 'remove' : 'flag';
+      const selected = selectedUserIds(payload.view && payload.view.state);
+      if (selected.length === 0) {
+        return reviewNotice(userId, '☝️ Tick at least one member first, then choose Keep, Revoke, or Flag.');
+      }
+      if (decision !== 'keep') {
+        // Collect one justification for the whole batch.
+        await slack.views.open({
+          trigger_id: payload.trigger_id,
+          view: buildBulkJustificationModal({ campaignId, channelId, decision, userIds: selected, page, pageSize, filter })
+        });
+        return;
+      }
+      await recordDecisions({
+        campaignId, channelId,
+        decisions: selected.map(uid => ({ targetUserId: uid, decision: 'keep' })),
+        reviewer, reviewerIsAdmin: isAdmin
+      });
+      const fresh = await getCampaign(campaignId);
+      await maybeNotifyComplete(fresh);
+      return publishRoster(userId, campaignId, channelId, isAdmin, { page, pageSize, filter });
+    }
+
+    // Keep-all-routine: bulk keep every undecided member with no risk flag.
+    if (id === 'rev_keep_routine') {
+      const routine = filterRoster(channel, 'todo').filter(m => !isException(m));
+      if (routine.length) {
+        await recordDecisions({
+          campaignId, channelId,
+          decisions: routine.map(m => ({ targetUserId: m.id, decision: 'keep' })),
+          reviewer, reviewerIsAdmin: isAdmin
+        });
+        const fresh = await getCampaign(campaignId);
+        await maybeNotifyComplete(fresh);
+      }
+      return publishRoster(userId, campaignId, channelId, isAdmin, { page: 0, pageSize, filter });
+    }
+
+    // Navigation.
+    if (id === 'rev_page_prev') page = Math.max(0, (page || 0) - 1);
+    else if (id === 'rev_page_next') page = (page || 0) + 1;
+    else if (id.startsWith('rev_filter_')) { filter = act.value; page = 0; }
+    else if (id === 'rev_pagesize') { pageSize = act.selected_option && act.selected_option.value; page = 0; }
+    // rev_open falls through with defaults.
+
+    await slack.views.publish({
+      user_id: userId,
+      view: buildReviewRosterView({ campaign, channel, userId, isAdmin, page, pageSize, filter })
+    });
+  } catch (error) {
+    console.error('Review home error:', error.message);
+    await reviewNotice(userId, '❌ Something went wrong. Reopen the review from the dashboard and try again.');
   }
 }
 

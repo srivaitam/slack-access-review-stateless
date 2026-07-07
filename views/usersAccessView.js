@@ -137,6 +137,13 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
           text: {
             type: 'mrkdwn',
             text: `*${c.name}*${overdue ? '  ⏰ *Overdue*' : ''}\n\`${progressBar(p.percent)}\` ${p.percent}% — ${p.decided}/${p.total} reviewed`
+          },
+          accessory: {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Open review' },
+            action_id: 'rev_open_index',
+            value: c.id,
+            style: 'primary'
           }
         },
         {
