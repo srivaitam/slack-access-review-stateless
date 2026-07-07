@@ -3,10 +3,10 @@ const { generateAccessSnapshot } = require('../services/accessService');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildLoadingView } = require('../views/loadingView');
-const { generateCSV, generateExcelXML, generateMembershipCSV } = require('../services/exportService');
+const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { getInternalDomains } = require('../services/riskScoringService');
-const { buildChannelBrowserModal, buildChannelMembersModal } = require('../views/channelBrowserModal');
+const { buildChannelBrowserModal, buildChannelMembersModal, buildChannelAuditExportModal } = require('../views/channelBrowserModal');
 const { buildCampaignCreateModal } = require('../views/campaignModal');
 const { recordDecision, recordDecisions, getCampaign, listCampaigns } = require('../services/campaignService');
 const { markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
@@ -87,21 +87,9 @@ async function handleAction(payload) {
       });
     }
 
-    // ─── F-001: channel-wise membership export ───
+    // ─── F-001/F-001b: channel-wise membership export — pick channels first ───
     if (action === 'export_membership_csv') {
-      const dm = await slack.conversations.open({ users: userId });
-      const dmChannelId = dm.channel.id;
-      await slack.chat.postMessage({ channel: dmChannelId, text: '⏳ Generating channel audit CSV (one row per channel × member)...' });
-
-      const { csv, metadata } = await generateMembershipCSV();
-      const timestamp = new Date().toISOString().slice(0, 10);
-      await slack.filesUploadV2({
-        channel_id: dmChannelId,
-        file: Buffer.from(csv, 'utf-8'),
-        filename: `channel-audit-${timestamp}.csv`,
-        title: `Channel Audit Export - ${timestamp}`,
-        initial_comment: `📥 *Channel Audit CSV Complete*\n🔗 ${metadata.totalMemberships} memberships | 📢 ${metadata.totalChannels} channels | 👥 ${metadata.totalUsers} users\n_One row per channel × member — sort by Channel to certify a channel, by Email to certify a person._`
-      });
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildChannelAuditExportModal() });
     }
 
     // ─── F-002: channel browser ───

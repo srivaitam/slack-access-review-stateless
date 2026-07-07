@@ -97,11 +97,15 @@ async function generateExcelXML() {
 // F-001: channel-centric membership export — one row per (channel, user)
 // pair. This is the normalized "long" format auditors expect: sort/pivot by
 // channel to certify a channel, or by user to certify a person.
-function buildMembershipRows(snapshot) {
+function buildMembershipRows(snapshot, channelIds) {
   const internalDomains = getInternalDomains(snapshot.users);
+  // Optional channel filter (F-001b): when a non-empty id list is passed, only
+  // those channels are exported. Absent/empty → every scanned channel.
+  const filterSet = channelIds && channelIds.length ? new Set(channelIds) : null;
   const rows = [];
   const sorted = [...snapshot.channels].sort((a, b) => b.riskScore - a.riskScore || a.channel.name.localeCompare(b.channel.name));
   for (const { channel, members, riskScore, errored } of sorted) {
+    if (filterSet && !filterSet.has(channel.id)) continue;
     for (const m of members) {
       const external = !internalDomains.has((m.email.split('@')[1] || '').toLowerCase());
       rows.push([
@@ -131,13 +135,24 @@ const MEMBERSHIP_HEADERS = [
 /**
  * Generate the channel-wise audit CSV (one row per channel×user).
  */
-async function generateMembershipCSV() {
+async function generateMembershipCSV({ channelIds } = {}) {
   const snapshot = await generateAccessSnapshot();
+  const memberRows = buildMembershipRows(snapshot, channelIds);
   const rows = [MEMBERSHIP_HEADERS.join(',')];
-  for (const r of buildMembershipRows(snapshot)) {
+  const exported = new Set();
+  for (const r of memberRows) {
+    exported.add(r[1]); // channel id column
     rows.push(r.map(csvEscape).join(','));
   }
-  return { csv: rows.join('\n'), metadata: { ...snapshot.metadata, totalMemberships: rows.length - 1 } };
+  return {
+    csv: rows.join('\n'),
+    metadata: {
+      ...snapshot.metadata,
+      totalMemberships: memberRows.length,
+      exportedChannels: exported.size,
+      requestedChannels: channelIds && channelIds.length ? channelIds.length : exported.size
+    }
+  };
 }
 
 function csvEscape(val) {

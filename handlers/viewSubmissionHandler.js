@@ -4,6 +4,7 @@ const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
 const { generateAccessSnapshot } = require('../services/accessService');
+const { generateMembershipCSV } = require('../services/exportService');
 const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
@@ -16,7 +17,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -65,6 +66,38 @@ async function handleViewSubmission(payload) {
         });
     });
 
+    return { response_action: 'clear' };
+  }
+
+  // F-001b: channel audit CSV for a chosen set of channels (admin-only, gated above).
+  if (callbackId === 'channel_audit_export_modal') {
+    const selected = payload.view.state.values.audit_channels?.audit_channels_select?.selected_conversations || [];
+    if (selected.length === 0) {
+      return { response_action: 'errors', errors: { audit_channels: 'Select at least one channel to export.' } };
+    }
+    // Snapshot + CSV build can exceed the 3s modal window — do it in the background.
+    setImmediate(async () => {
+      try {
+        const dm = await slack.conversations.open({ users: adminId });
+        const dmChannelId = dm.channel.id;
+        await slack.chat.postMessage({ channel: dmChannelId, text: `⏳ Generating channel audit CSV for ${selected.length} selected channel(s)…` });
+        const { csv, metadata } = await generateMembershipCSV({ channelIds: selected });
+        const timestamp = new Date().toISOString().slice(0, 10);
+        const skipped = selected.length - metadata.exportedChannels;
+        await slack.filesUploadV2({
+          channel_id: dmChannelId,
+          file: Buffer.from(csv, 'utf-8'),
+          filename: `channel-audit-${timestamp}.csv`,
+          title: `Channel Audit Export - ${timestamp}`,
+          initial_comment: `📥 *Channel Audit CSV*\n📢 ${metadata.exportedChannels} channel(s) · 🔗 ${metadata.totalMemberships} membership row(s)` +
+            (skipped > 0 ? `\n⚠️ ${skipped} selected channel(s) skipped — not scanned by the app (archived, or the bot isn't a member).` : '') +
+            `\n_One row per channel × member — sort by Channel to certify a channel, by Email to certify a person._`
+        });
+      } catch (e) {
+        console.error('[EXPORT] channel audit failed:', e.message);
+        slack.chat.postMessage({ channel: adminId, text: '❌ Channel audit export failed. Please try again.' }).catch(() => {});
+      }
+    });
     return { response_action: 'clear' };
   }
 

@@ -111,4 +111,34 @@ function buildChannelMembersModal(channelEntry, internalDomains) {
   };
 }
 
-module.exports = { buildChannelBrowserModal, buildChannelMembersModal };
+// F-001b: pick which channels to include in the channel audit CSV. Uses a
+// native multi-channel typeahead (no 100-option cap); the export filters the
+// scanned snapshot to the selected ids and skips anything not in scope.
+function buildChannelAuditExportModal() {
+  return {
+    type: 'modal',
+    callback_id: 'channel_audit_export_modal',
+    title: { type: 'plain_text', text: 'Channel Audit Export' },
+    submit: { type: 'plain_text', text: 'Export CSV' },
+    close: { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'audit_channels',
+        label: { type: 'plain_text', text: 'Channels to export' },
+        element: {
+          type: 'multi_conversations_select',
+          action_id: 'audit_channels_select',
+          placeholder: { type: 'plain_text', text: 'Select one or more channels…' },
+          filter: { include: ['public', 'private'], exclude_bot_users: true }
+        }
+      },
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: 'Exports one row per channel × member for the channels you pick. Only channels the app has scanned can be exported — anything else (archived, or the bot isn\'t a member) is skipped.' }]
+      }
+    ]
+  };
+}
+
+module.exports = { buildChannelBrowserModal, buildChannelMembersModal, buildChannelAuditExportModal };

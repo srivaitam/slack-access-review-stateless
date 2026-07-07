@@ -116,8 +116,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
           action_id: 'export_menu',
           options: [
             { text: { type: 'plain_text', text: '📥 Export users CSV' }, value: 'export_csv' },
-            { text: { type: 'plain_text', text: '📊 Export Excel workbook' }, value: 'export_excel' },
-            { text: { type: 'plain_text', text: '📋 Channel audit CSV' }, value: 'export_membership_csv' }
+            { text: { type: 'plain_text', text: '📋 Channel audit CSV (choose channels)' }, value: 'export_membership_csv' }
           ]
         }
       ]
