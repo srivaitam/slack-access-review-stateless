@@ -170,7 +170,7 @@ function decisionLabel(d) {
   return d === 'keep' ? '✅ Kept' : d === 'remove' ? '🗑 Marked for removal' : '🚩 Flagged';
 }
 
-function buildReviewRosterView({ campaign, channel, userId, isAdmin = false, page = 0, pageSize = DEFAULT_PAGE_SIZE, filter = 'todo' }) {
+function buildReviewRosterView({ campaign, channel, userId, isAdmin = false, page = 0, pageSize = DEFAULT_PAGE_SIZE, filter = 'todo', selectAll = false }) {
   const flt = FILTERS.some(f => f.key === filter) ? filter : 'todo';
   const prog = channelProgress(channel);
   const filtered = filterRoster(channel, flt);
@@ -251,24 +251,31 @@ function buildReviewRosterView({ campaign, channel, userId, isAdmin = false, pag
     const undecidedSlice = pg.slice.filter(m => !hasDecision(channel, m.id));
     const decidedSlice = pg.slice.filter(m => hasDecision(channel, m.id));
 
-    for (let i = 0; i < undecidedSlice.length; i += CHECKBOX_CHUNK) {
-      const chunk = undecidedSlice.slice(i, i + CHECKBOX_CHUNK);
+    // Select all / clear for the members shown on this page.
+    if (undecidedSlice.length > 0) {
       blocks.push({
         type: 'actions',
-        block_id: `rev_grp_${i}`,
-        elements: [{
-          type: 'checkboxes',
-          action_id: `rev_select_${i}`,
-          options: chunk.map(m => {
-            const flagText = memberFlagText(m);
-            return {
-              text: { type: 'mrkdwn', text: trim(`*${m.name}*${flagText ? ' · ' + flagText : ''}`, 74) },
-              description: { type: 'plain_text', text: trim(m.email || m.role || ' ', 74) },
-              value: m.id
-            };
-          })
-        }]
+        block_id: 'rev_selectbar',
+        elements: [
+          { type: 'button', text: { type: 'plain_text', text: `Select all on page (${undecidedSlice.length})` }, action_id: 'rev_select_all' },
+          { type: 'button', text: { type: 'plain_text', text: 'Clear' }, action_id: 'rev_clear_all' }
+        ]
       });
+    }
+
+    for (let i = 0; i < undecidedSlice.length; i += CHECKBOX_CHUNK) {
+      const chunk = undecidedSlice.slice(i, i + CHECKBOX_CHUNK);
+      const opts = chunk.map(m => {
+        const flagText = memberFlagText(m);
+        return {
+          text: { type: 'mrkdwn', text: trim(`*${m.name}*${flagText ? ' · ' + flagText : ''}`, 74) },
+          description: { type: 'plain_text', text: trim(m.email || m.role || ' ', 74) },
+          value: m.id
+        };
+      });
+      const checkboxes = { type: 'checkboxes', action_id: `rev_select_${i}`, options: opts };
+      if (selectAll) checkboxes.initial_options = opts;
+      blocks.push({ type: 'actions', block_id: `rev_grp_${i}`, elements: [checkboxes] });
     }
 
     // Already-decided members on this page (only appears under the 'all' filter).

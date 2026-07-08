@@ -115,6 +115,7 @@ function buildChannelMembersModal(channelEntry, internalDomains) {
 // native multi-channel typeahead (no 100-option cap); the export filters the
 // scanned snapshot to the selected ids and skips anything not in scope.
 function buildChannelAuditExportModal() {
+  const allOption = { text: { type: 'plain_text', text: 'Export ALL scanned channels' }, value: 'all' };
   return {
     type: 'modal',
     callback_id: 'channel_audit_export_modal',
@@ -124,8 +125,16 @@ function buildChannelAuditExportModal() {
     blocks: [
       {
         type: 'input',
+        block_id: 'audit_all',
+        optional: true,
+        label: { type: 'plain_text', text: 'Everything' },
+        element: { type: 'checkboxes', action_id: 'all', options: [allOption] }
+      },
+      {
+        type: 'input',
         block_id: 'audit_channels',
-        label: { type: 'plain_text', text: 'Channels to export' },
+        optional: true,
+        label: { type: 'plain_text', text: 'Or pick specific channels' },
         element: {
           type: 'multi_conversations_select',
           action_id: 'audit_channels_select',
@@ -135,7 +144,7 @@ function buildChannelAuditExportModal() {
       },
       {
         type: 'context',
-        elements: [{ type: 'mrkdwn', text: 'Exports one row per channel × member for the channels you pick. Only channels the app has scanned can be exported — anything else (archived, or the bot isn\'t a member) is skipped.' }]
+        elements: [{ type: 'mrkdwn', text: 'Tick *Export ALL scanned channels* for the full audit, or pick specific channels below. One row per channel × member. Channels the app hasn\'t scanned (archived, or the bot isn\'t a member) are skipped.' }]
       }
     ]
   };

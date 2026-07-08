@@ -101,19 +101,21 @@ async function handleViewSubmission(payload) {
 
   // F-001b: channel audit CSV for a chosen set of channels (admin-only, gated above).
   if (callbackId === 'channel_audit_export_modal') {
-    const selected = payload.view.state.values.audit_channels?.audit_channels_select?.selected_conversations || [];
-    if (selected.length === 0) {
-      return { response_action: 'errors', errors: { audit_channels: 'Select at least one channel to export.' } };
+    const v = payload.view.state.values;
+    const exportAll = (v.audit_all?.all?.selected_options?.length || 0) > 0;
+    const selected = v.audit_channels?.audit_channels_select?.selected_conversations || [];
+    if (!exportAll && selected.length === 0) {
+      return { response_action: 'errors', errors: { audit_channels: 'Pick channels, or tick "Export ALL scanned channels" above.' } };
     }
     // Snapshot + CSV build can exceed the 3s modal window — do it in the background.
     setImmediate(async () => {
       try {
         const dm = await slack.conversations.open({ users: adminId });
         const dmChannelId = dm.channel.id;
-        await slack.chat.postMessage({ channel: dmChannelId, text: `⏳ Generating channel audit CSV for ${selected.length} selected channel(s)…` });
-        const { csv, metadata } = await generateMembershipCSV({ channelIds: selected });
+        await slack.chat.postMessage({ channel: dmChannelId, text: exportAll ? '⏳ Generating channel audit CSV for all channels…' : `⏳ Generating channel audit CSV for ${selected.length} selected channel(s)…` });
+        const { csv, metadata } = await generateMembershipCSV(exportAll ? {} : { channelIds: selected });
         const timestamp = new Date().toISOString().slice(0, 10);
-        const skipped = selected.length - metadata.exportedChannels;
+        const skipped = exportAll ? 0 : (selected.length - metadata.exportedChannels);
         await slack.filesUploadV2({
           channel_id: dmChannelId,
           file: Buffer.from(csv, 'utf-8'),

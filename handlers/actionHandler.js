@@ -459,15 +459,18 @@ async function handleReviewHome(payload) {
     }
 
     // Navigation.
+    let selectAll = false;
     if (id === 'rev_page_prev') page = Math.max(0, (page || 0) - 1);
     else if (id === 'rev_page_next') page = (page || 0) + 1;
     else if (id.startsWith('rev_filter_')) { filter = act.value; page = 0; }
     else if (id === 'rev_pagesize') { pageSize = act.selected_option && act.selected_option.value; page = 0; }
+    else if (id === 'rev_select_all') { selectAll = true; }
+    else if (id === 'rev_clear_all') { selectAll = false; }
     // rev_open falls through with defaults.
 
     await slack.views.publish({
       user_id: userId,
-      view: buildReviewRosterView({ campaign, channel, userId, isAdmin, page, pageSize, filter })
+      view: buildReviewRosterView({ campaign, channel, userId, isAdmin, page, pageSize, filter, selectAll })
     });
   } catch (error) {
     console.error('Review home error:', error.message);
