@@ -148,9 +148,19 @@ async function handleAction(payload) {
     // ─── F-009: configure internal/external domains ───
     if (action === 'open_domain_settings') {
       const current = await getInternalDomainsSetting().catch(() => []);
+      let discovered = [];
       let detected = '';
-      try { const snap = await generateAccessSnapshot(); detected = getPrimaryDomain(snap.users); } catch (e) { /* best effort */ }
-      await slack.views.open({ trigger_id: payload.trigger_id, view: buildDomainSettingsModal({ currentDomains: current, detected }) });
+      try {
+        const snap = await generateAccessSnapshot();
+        detected = getPrimaryDomain(snap.users);
+        const counts = {};
+        snap.users.forEach(u => {
+          const d = ((u.email || '').split('@')[1] || '').toLowerCase();
+          if (d) counts[d] = (counts[d] || 0) + 1;
+        });
+        discovered = Object.entries(counts).map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count);
+      } catch (e) { /* best effort */ }
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildDomainSettingsModal({ discovered, currentDomains: current, detected }) });
     }
 
     // ─── F-007/F-008: multi-channel revoke — plan-gated, then open the modal ───

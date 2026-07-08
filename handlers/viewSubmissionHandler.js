@@ -65,20 +65,24 @@ async function handleViewSubmission(payload) {
     }
   }
 
-  // F-009: save internal domains (admin-only, gated above).
+  // F-009: save internal domains — ticked from the list + any free-text extras
+  // (admin-only, gated above). Unticked domains are treated as external.
   if (callbackId === 'domain_settings_modal') {
-    const raw = payload.view.state.values.domains?.domains_input?.value || '';
-    const domains = raw.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+    const v = payload.view.state.values;
+    const selected = (v.domains_select?.domains_multi?.selected_options || []).map(o => String(o.value).toLowerCase());
+    const raw = v.domains_extra?.domains_input?.value || '';
+    const extra = raw.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+    const domains = [...new Set([...selected, ...extra])];
     const domainRe = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
     const invalid = domains.filter(d => !domainRe.test(d));
     if (invalid.length) {
-      return { response_action: 'errors', errors: { domains: `Not a valid domain: ${invalid.join(', ')}. Use e.g. vaitam.com` } };
+      return { response_action: 'errors', errors: { domains_extra: `Not a valid domain: ${invalid.join(', ')}. Use e.g. vaitam.com` } };
     }
     await saveInternalDomains(domains);
     invalidateSnapshotCache();
     setImmediate(() => dmUser(adminId, {
       text: domains.length
-        ? `✅ Internal domains set to *${domains.join(', ')}*. Open Access Review → *Refresh* to recompute risk and external flags.`
+        ? `✅ Internal domains set to *${domains.join(', ')}*. Everyone else is external. Open Access Review → *Refresh* to recompute.`
         : '✅ Cleared — the app will auto-detect the most common domain again. Open Access Review → *Refresh* to recompute.'
     }));
     return { response_action: 'clear' };
