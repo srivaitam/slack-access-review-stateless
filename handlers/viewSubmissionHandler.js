@@ -138,14 +138,16 @@ async function handleViewSubmission(payload) {
     const plan = await getWorkspacePlan().catch(() => ({}));
     if (!plan.canRevoke) return planBlockedView();
     const v = payload.view.state.values;
-    const targetUserId = v.revoke_user?.user?.selected_user;
-    const channelIds = v.revoke_channels?.channels?.selected_conversations || [];
+    let revMeta = {};
+    try { revMeta = JSON.parse(payload.view.private_metadata || '{}'); } catch (e) { /* no metadata */ }
+    const targetUserId = revMeta.userId || v.revoke_user?.revoke_user_select?.selected_user;
+    const channelIds = (v.revoke_channels?.channels?.selected_options || []).map(o => o.value);
     const reason = (v.revoke_reason?.reason?.value || '').trim();
     const notifyUser = (v.revoke_notify?.notify?.selected_options?.length || 0) > 0;
 
     const errors = {};
-    if (!targetUserId) errors.revoke_user = 'Select a user to revoke.';
-    if (channelIds.length === 0) errors.revoke_channels = 'Select at least one channel.';
+    if (!targetUserId) errors.revoke_reason = 'Pick a user at the top first — their channels will load.';
+    else if (channelIds.length === 0) errors.revoke_channels = 'Select at least one channel.';
     if (reason.length < 10) errors.revoke_reason = 'Please give a reason of at least 10 characters.';
     if (Object.keys(errors).length > 0) return { response_action: 'errors', errors };
 

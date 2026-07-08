@@ -14,6 +14,16 @@ const { recordDecision, recordDecisions, getCampaign, listCampaigns } = require(
 const { markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewIndexView, buildReviewRosterView, buildBulkJustificationModal, filterRoster, isException } = require('../views/reviewHomeView');
 
+// Open a modal from an interaction. If the click came from within a modal (e.g.
+// the channel browser), push onto that modal's stack; from the Home tab or a
+// message, open a fresh modal. views.open from inside a modal silently fails.
+async function openOrPush(payload, view) {
+  if (payload.view && payload.view.type === 'modal') {
+    return slack.views.push({ trigger_id: payload.trigger_id, view });
+  }
+  return slack.views.open({ trigger_id: payload.trigger_id, view });
+}
+
 async function handleAction(payload) {
   const userId = payload.user.id;
   let action = payload.actions[0].action_id;
@@ -41,7 +51,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'sort_users', 'toggle_deactivated'
+    'open_revoke_modal', 'revoke_user_select', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -146,6 +156,16 @@ async function handleAction(payload) {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildRevokeAccessModal() });
     }
 
+    // ─── F-007: user picked in the revoke modal — load the channels they're in ───
+    if (action === 'revoke_user_select') {
+      const selectedUser = payload.actions[0].selected_user;
+      const snapshot = await generateAccessSnapshot();
+      const ua = snapshot.userAccessMap.get(selectedUser);
+      const channels = ua ? ua.channels.map(ch => ({ id: ch.id, name: ch.name, is_private: ch.is_private })) : [];
+      const viewId = payload.view?.id || payload.container?.view_id;
+      await slack.views.update({ view_id: viewId, view: buildRevokeAccessModal({ selectedUserId: selectedUser, channels }) });
+    }
+
     // ─── Export CSV ───
     if (action === 'export_csv') {
       // Open DM to get a valid channel_id (user IDs don't work with filesUploadV2)
@@ -198,17 +218,14 @@ async function handleAction(payload) {
 
       const adminInfo = await slack.users.info({ user: userId });
       if (!adminInfo.user.is_owner && !adminInfo.user.is_admin) {
-        await slack.views.open({
-          trigger_id: payload.trigger_id,
-          view: {
-            type: 'modal',
-            title: { type: 'plain_text', text: 'Access Denied' },
-            close: { type: 'plain_text', text: 'Close' },
-            blocks: [{
-              type: 'section',
-              text: { type: 'mrkdwn', text: '🚫 *Access Denied*\n\nOnly workspace Owners and Admins can view user access details and perform revocations.' }
-            }]
-          }
+        await openOrPush(payload, {
+          type: 'modal',
+          title: { type: 'plain_text', text: 'Access Denied' },
+          close: { type: 'plain_text', text: 'Close' },
+          blocks: [{
+            type: 'section',
+            text: { type: 'mrkdwn', text: '🚫 *Access Denied*\n\nOnly workspace Owners and Admins can view user access details and perform revocations.' }
+          }]
         });
         return;
       }
@@ -218,9 +235,13 @@ async function handleAction(payload) {
 
       if (userAccess) {
         const plan = await getWorkspacePlan().catch(() => ({}));
-        await slack.views.open({
-          trigger_id: payload.trigger_id,
-          view: buildUserAccessModal(userAccess, { canRevoke: Boolean(plan.canRevoke) })
+        await openOrPush(payload, buildUserAccessModal(userAccess, { canRevoke: Boolean(plan.canRevoke) }));
+      } else {
+        await openOrPush(payload, {
+          type: 'modal',
+          title: { type: 'plain_text', text: 'User Access Detail' },
+          close: { type: 'plain_text', text: 'Close' },
+          blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '_No access data for this user yet. Try *Refresh* on the dashboard, then reopen._' } }]
         });
       }
     }

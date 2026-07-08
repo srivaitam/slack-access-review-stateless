@@ -62,8 +62,8 @@ async function revokeUserAccess({ userId, userName, userEmail, channelIds, reaso
         let friendlyError = errCode;
         if (errCode === 'cant_kick_self') friendlyError = 'Cannot remove yourself';
         if (errCode === 'cant_kick_admin') friendlyError = 'Cannot remove workspace admins/owners';
-        if (errCode === 'not_in_channel') friendlyError = 'Bot could not join channel';
-        if (errCode === 'channel_not_found') friendlyError = 'Channel not found or bot has no access';
+        if (errCode === 'not_in_channel') friendlyError = 'Bot is not in this channel — run /invite @AccessReview in the channel, then retry.';
+        if (errCode === 'channel_not_found') friendlyError = 'Channel not found, or the bot has no access. For a private channel, invite the bot first: /invite @AccessReview in the channel.';
         if (errCode === 'missing_scope') friendlyError = 'Bot missing required permission scope';
         if (errCode === 'restricted_action') friendlyError = 'Blocked by a workspace setting — an Owner must allow member removal at Settings → Permissions → Channel Management → "People who can remove members from public channels" (set to "Everyone, except guests").';
 
@@ -116,10 +116,13 @@ async function ensureBotInChannel(channelId) {
       return;
     }
 
-    // Private channel - bot must be manually invited, can't auto-join
+    // Private channel: conversations.join doesn't work for private channels at
+    // all — even when the bot IS already a member. So don't fail here; let the
+    // caller attempt the kick. If the bot is in the channel the kick succeeds;
+    // if not, the kick fails and we surface a clear "invite the bot" message.
     if (errCode === 'method_not_supported_for_channel_type' || errCode === 'is_private') {
-      console.warn('[REVOKE] Private channel - bot must be manually invited: ' + channelId);
-      throw new Error('Bot not in private channel. Run /invite @AccessReview in #channel first.');
+      console.warn('[REVOKE] Private channel — skipping auto-join for ' + channelId);
+      return;
     }
 
     // Unknown join error — fail closed (M3): do NOT blindly attempt a kick.
