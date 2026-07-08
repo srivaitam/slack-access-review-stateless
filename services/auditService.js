@@ -29,8 +29,29 @@ function getSecret() {
   return 'dev-insecure-audit-secret'; // dev only — set a real secret in prod
 }
 
+// Deterministic serialization: recursively sorts object keys so the output is
+// independent of key ordering. This is REQUIRED because entries are stored in a
+// Postgres JSONB column, and JSONB reorders object keys on write. Hashing the
+// re-read object with a naive JSON.stringify produced false "hash mismatch"
+// chain breaks (H5b) even with no tampering. Sorting keys makes write-time and
+// read-time serialization identical regardless of how storage ordered them.
+// Matches JSON.stringify semantics for undefined (omit in objects, null in arrays).
+function stableStringify(value) {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return '[' + value.map(v => { const s = stableStringify(v); return s === undefined ? 'null' : s; }).join(',') + ']';
+  }
+  const parts = [];
+  for (const k of Object.keys(value).sort()) {
+    const s = stableStringify(value[k]);
+    if (s !== undefined) parts.push(JSON.stringify(k) + ':' + s);
+  }
+  return '{' + parts.join(',') + '}';
+}
+
 function canonical(entry) {
-  return JSON.stringify({
+  return stableStringify({
     id: entry.id,
     timestamp: entry.timestamp,
     action: entry.action,
@@ -258,12 +279,57 @@ async function findIncompleteRevocations(teamId = getCurrentTeamId()) {
   return out;
 }
 
+// ── Re-seal (H5b remediation) ───────────────────────────────────────────────
+// One-time fix for chains written before canonicalization was made JSONB-safe.
+// Recomputes prev_hash + hash for every entry, in seq order, over the CURRENT
+// stored content using the deterministic canonical form. It does NOT alter the
+// audited facts (actor/action/target/result/reason/metadata are untouched) —
+// it only rewrites the integrity seals so the chain verifies again. Runs under
+// the per-team advisory lock so it can't race with live appends.
+async function resealChain(teamId) {
+  if (!db.isDbEnabled()) throw new Error('resealChain is DB-mode only');
+  const secret = getSecret();
+  return db.withTx(async client => {
+    await client.query('SELECT pg_advisory_xact_lock($1)', [teamLockKey(teamId)]);
+    const { rows } = await client.query(
+      'SELECT seq, entry FROM audit_log WHERE team_id = $1 ORDER BY seq', [teamId]);
+    let prev = GENESIS;
+    let updated = 0;
+    for (const row of rows) {
+      const e = row.entry;
+      e.prev_hash = prev;
+      const { hash, ...rest } = e; // eslint-disable-line no-unused-vars
+      const newHash = computeHash(rest, secret);
+      e.hash = newHash;
+      await client.query(
+        'UPDATE audit_log SET entry = $1, prev_hash = $2, hash = $3 WHERE team_id = $4 AND seq = $5',
+        [JSON.stringify(e), prev, newHash, teamId, row.seq]);
+      prev = newHash;
+      updated++;
+    }
+    return { teamId, updated, lastHash: prev };
+  });
+}
+
+async function resealAllChains() {
+  if (!db.isDbEnabled()) throw new Error('resealAllChains is DB-mode only');
+  const { rows } = await db.query('SELECT DISTINCT team_id FROM audit_log');
+  const out = [];
+  for (const r of rows) out.push(await resealChain(r.team_id));
+  return out;
+}
+
 module.exports = {
   logAuditEvent,
   verifyAuditChain,
   verifyAllChains,
+  verifyEntries,
+  canonical,
+  computeHash,
   logFileFor,
   readAllEntries,
   hasCompletedRevocation,
-  findIncompleteRevocations
+  findIncompleteRevocations,
+  resealChain,
+  resealAllChains
 };
