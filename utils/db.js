@@ -82,6 +82,11 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS audit_log_team_seq_idx ON audit_log (team_id, seq);
+    CREATE TABLE IF NOT EXISTS settings (
+      team_id    TEXT PRIMARY KEY,
+      data       JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
   console.log('[DB] schema ready');
 }

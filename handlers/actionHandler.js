@@ -4,10 +4,12 @@ const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
 const { getWorkspacePlan } = require('../services/planService');
+const { buildDomainSettingsModal } = require('../modals/domainSettingsModal');
+const { getInternalDomainsSetting } = require('../services/settingsService');
 const { buildLoadingView } = require('../views/loadingView');
 const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
-const { getInternalDomains } = require('../services/riskScoringService');
+const { getInternalDomains, getPrimaryDomain } = require('../services/riskScoringService');
 const { buildChannelBrowserModal, buildChannelMembersModal, buildChannelAuditExportModal } = require('../views/channelBrowserModal');
 const { buildCampaignCreateModal } = require('../views/campaignModal');
 const { recordDecision, recordDecisions, getCampaign, listCampaigns } = require('../services/campaignService');
@@ -51,7 +53,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'revoke_user_select', 'sort_users', 'toggle_deactivated'
+    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -141,6 +143,14 @@ async function handleAction(payload) {
     // ─── F-003: create review campaign ───
     if (action === 'create_campaign') {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
+    }
+
+    // ─── F-009: configure internal/external domains ───
+    if (action === 'open_domain_settings') {
+      const current = await getInternalDomainsSetting().catch(() => []);
+      let detected = '';
+      try { const snap = await generateAccessSnapshot(); detected = getPrimaryDomain(snap.users); } catch (e) { /* best effort */ }
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildDomainSettingsModal({ currentDomains: current, detected }) });
     }
 
     // ─── F-007/F-008: multi-channel revoke — plan-gated, then open the modal ───

@@ -3,6 +3,7 @@ const { getAllUsers } = require('../slack/users');
 const { getAllChannels } = require('../slack/channels');
 const { getChannelMembers } = require('../slack/channelMembers');
 const { calculateChannelRisk, calculateUserRiskScore } = require('./riskScoringService');
+const { loadSettings } = require('./settingsService');
 const { logInfo } = require('../utils/logger');
 const { getCurrentTeamId } = require('../slack/client');
 
@@ -22,6 +23,10 @@ async function generateAccessSnapshot(options = {}) {
     if (onProgress) onProgress(100, 'Loaded from recent cache');
     return _cache.snapshot;
   }
+
+  // Warm the per-team settings cache so risk scoring sees the configured
+  // internal domains (getInternalDomains reads it synchronously per channel).
+  await loadSettings(teamId).catch(() => {});
 
   if (onProgress) onProgress(10, 'Fetching workspace users...');
   const users = await getAllUsers();

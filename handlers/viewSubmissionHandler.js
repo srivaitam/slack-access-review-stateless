@@ -3,8 +3,9 @@ const { buildRevocationConfirmModal } = require('../modals/revocationConfirmModa
 const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
-const { generateAccessSnapshot } = require('../services/accessService');
+const { generateAccessSnapshot, invalidateSnapshotCache } = require('../services/accessService');
 const { generateMembershipCSV } = require('../services/exportService');
+const { saveInternalDomains } = require('../services/settingsService');
 const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
@@ -47,7 +48,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -62,6 +63,25 @@ async function handleViewSubmission(payload) {
         }
       };
     }
+  }
+
+  // F-009: save internal domains (admin-only, gated above).
+  if (callbackId === 'domain_settings_modal') {
+    const raw = payload.view.state.values.domains?.domains_input?.value || '';
+    const domains = raw.split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+    const domainRe = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+    const invalid = domains.filter(d => !domainRe.test(d));
+    if (invalid.length) {
+      return { response_action: 'errors', errors: { domains: `Not a valid domain: ${invalid.join(', ')}. Use e.g. vaitam.com` } };
+    }
+    await saveInternalDomains(domains);
+    invalidateSnapshotCache();
+    setImmediate(() => dmUser(adminId, {
+      text: domains.length
+        ? `✅ Internal domains set to *${domains.join(', ')}*. Open Access Review → *Refresh* to recompute risk and external flags.`
+        : '✅ Cleared — the app will auto-detect the most common domain again. Open Access Review → *Refresh* to recompute.'
+    }));
+    return { response_action: 'clear' };
   }
 
   // F-003: launch a review campaign

@@ -116,6 +116,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
         },
         { type: 'button', text: { type: 'plain_text', text: 'Browse channels' }, action_id: 'browse_channels' },
         { type: 'button', text: { type: 'plain_text', text: 'New review campaign' }, action_id: 'create_campaign' },
+        { type: 'button', text: { type: 'plain_text', text: '⚙️ Domains' }, action_id: 'open_domain_settings' },
         ...(plan.canRevoke ? [{ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' }] : []),
         {
           type: 'overflow',

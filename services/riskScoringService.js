@@ -1,5 +1,7 @@
 // Risk weights are configurable via RISK_WEIGHTS (JSON env), else defaults.
-// Internal domains via INTERNAL_EMAIL_DOMAINS (comma-separated), else majority.
+// Internal domains: in-app configured (settingsService) > INTERNAL_EMAIL_DOMAINS
+// env > majority auto-detect.
+const { getCachedInternalDomains } = require('./settingsService');
 const DEFAULT_WEIGHTS = { externalUsers: 30, guestUsers: 25, privilegedUsers: 20, inactiveUsers: 15, sensitiveChannel: 10 };
 
 function getWeights() {
@@ -11,6 +13,8 @@ function getWeights() {
 }
 
 function getInternalDomains(users) {
+  const configured = getCachedInternalDomains();
+  if (configured && configured.length) return new Set(configured.map(d => d.toLowerCase()));
   const env = process.env.INTERNAL_EMAIL_DOMAINS;
   if (env) return new Set(env.split(',').map(d => d.trim().toLowerCase()).filter(Boolean));
   return new Set([getPrimaryDomain(users).toLowerCase()]);
