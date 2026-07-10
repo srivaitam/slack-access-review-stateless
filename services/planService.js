@@ -41,7 +41,11 @@ function computeCanRevoke({ planRaw, isEnterprise }, env = process.env) {
   if (env.REVOKE_ENABLED === 'true') return true;
   if (env.REVOKE_ENABLED === 'false') return false;
   if (isEnterprise) return true;
-  if (planRaw == null) return false; // couldn't detect → fail closed
+  // Couldn't detect the plan (team.billing.info unavailable) → fail OPEN. Only a
+  // KNOWN Free/Pro plan hides revoke; an unreadable plan shouldn't hide a feature
+  // that works. Slack still enforces the actual removal permission and reports a
+  // clear error if it isn't allowed.
+  if (planRaw == null) return true;
   const allowed = env.REVOKE_ALLOWED_PLANS
     ? env.REVOKE_ALLOWED_PLANS.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
     : DEFAULT_ALLOWED;
