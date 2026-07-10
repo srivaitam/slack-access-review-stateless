@@ -1,5 +1,8 @@
 const { slack } = require('../slack/client');
-const { generateAccessSnapshot } = require('../services/accessService');
+const { generateAccessSnapshot, invalidateSnapshotCache } = require('../services/accessService');
+const { buildAccessRequestModal, approverMessage } = require('../modals/accessRequestModal');
+const { getRequest, decide } = require('../services/accessRequestService');
+const { logAuditEvent } = require('../services/auditService');
 const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
@@ -52,6 +55,16 @@ async function handleAction(payload) {
   // their own channels; handleReviewHome re-checks reviewer/admin per channel.
   if (action.startsWith('rev_')) {
     return handleReviewHome(payload);
+  }
+
+  // F-018: access request flow — member opens the request modal; the approver
+  // (channel owner) decides. Not admin-gated; handleAccessDecision authorizes.
+  if (action === 'open_access_request') {
+    await slack.views.open({ trigger_id: payload.trigger_id, view: buildAccessRequestModal() }).catch(e => console.error('[REQUEST] open failed:', e.message));
+    return;
+  }
+  if (action === 'approve_access_request' || action === 'deny_access_request') {
+    return handleAccessDecision(payload, action);
   }
 
   // Authorization (C3/M6): actions that expose or act on the whole workspace
@@ -559,6 +572,76 @@ async function handleReviewHome(payload) {
   } catch (error) {
     console.error('Review home error:', error.message);
     await reviewNotice(userId, '❌ Something went wrong. Reopen the review from the dashboard and try again.');
+  }
+}
+
+// ─── F-018: access request approve/deny ────────────────────────────────────
+async function dmUserAH(userId, message) {
+  try {
+    const dm = await slack.conversations.open({ users: userId });
+    await slack.chat.postMessage({ channel: dm.channel.id, ...message });
+  } catch (e) {
+    console.error('[REQUEST] DM failed for', userId, e.message);
+  }
+}
+
+async function updateApproverMessage(payload, text) {
+  try {
+    if (payload.container && payload.container.channel_id && payload.message && payload.message.ts) {
+      await slack.chat.update({ channel: payload.container.channel_id, ts: payload.message.ts, text, blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] });
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function handleAccessDecision(payload, action) {
+  const userId = payload.user.id;
+  const requestId = payload.actions[0].value;
+  try {
+    const req = await getRequest(requestId);
+    if (!req) { await dmUserAH(userId, { text: '⚠️ That access request was not found.' }); return; }
+
+    const isAdmin = await isWorkspaceAdmin(userId);
+    if (req.approverId !== userId && !isAdmin) {
+      await dmUserAH(userId, { text: '🚫 Only the channel owner (or a workspace admin) can decide this request.' });
+      return;
+    }
+    if (req.status !== 'pending') { await updateApproverMessage(payload, `This request was already ${req.status}.`); return; }
+
+    const info = await slack.users.info({ user: userId });
+    const approver = { id: userId, name: info.user.profile.real_name || info.user.name, email: info.user.profile.email || 'unknown' };
+
+    if (action === 'deny_access_request') {
+      const done = await decide(requestId, 'denied', { approver });
+      if (!done) { await updateApproverMessage(payload, 'Already handled.'); return; }
+      await logAuditEvent({ action: 'ACCESS_REQUEST_DENIED', actor: approver, target: { userId: req.requester.id, userName: req.requester.name, channelId: req.channelId, channelName: req.channelName }, result: {}, reason: 'Access request denied', metadata: { requestId } });
+      await updateApproverMessage(payload, `🚫 Denied — <@${req.requester.id}> for #${req.channelName}`);
+      await dmUserAH(req.requester.id, { text: `🚫 Your request for *#${req.channelName}* was denied by <@${userId}>.` });
+      return;
+    }
+
+    // Approve → add the requester to the channel.
+    try {
+      try { await slack.conversations.join({ channel: req.channelId }); } catch (e) { /* private or already a member */ }
+      await slack.conversations.invite({ channel: req.channelId, users: req.requester.id });
+    } catch (e) {
+      const err = (e.data && e.data.error) || e.message;
+      if (err !== 'already_in_channel') {
+        const friendly = (err === 'not_in_channel' || err === 'channel_not_found')
+          ? 'the bot must be in that channel first (for private channels, run /invite @AccessReview there)'
+          : err;
+        await dmUserAH(userId, { text: `❌ Couldn't add <@${req.requester.id}> to #${req.channelName}: ${friendly}. The request is left pending.` });
+        return;
+      }
+    }
+    const done = await decide(requestId, 'approved', { approver });
+    if (!done) { await updateApproverMessage(payload, 'Already handled.'); return; }
+    await logAuditEvent({ action: 'ACCESS_GRANTED', actor: approver, target: { userId: req.requester.id, userName: req.requester.name, userEmail: req.requester.email, channelId: req.channelId, channelName: req.channelName }, result: { granted: true }, reason: req.reason, metadata: { requestId } });
+    invalidateSnapshotCache();
+    await updateApproverMessage(payload, `✅ Approved — <@${req.requester.id}> added to #${req.channelName}`);
+    await dmUserAH(req.requester.id, { text: `✅ Your request for *#${req.channelName}* was approved — you've been added.` });
+  } catch (e) {
+    console.error('[REQUEST] decision failed:', e.message);
+    await dmUserAH(userId, { text: '❌ Something went wrong handling that request.' });
   }
 }
 

@@ -5,6 +5,7 @@ const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { listCampaigns } = require('../services/campaignService');
 const { getWorkspacePlan } = require('../services/planService');
+const { buildMemberHomeView } = require('../modals/accessRequestModal');
 
 function homeMessage(text) {
   return { type: 'home', blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }] };
@@ -31,12 +32,10 @@ async function handleEvent(event) {
   if (event.event?.type === 'app_home_opened') {
     const userId = event.event.user;
     try {
-      // M6: only owners/admins may view the workspace-wide access dashboard.
+      // M6: only owners/admins see the workspace-wide dashboard. Everyone else
+      // gets the member home — where they can request channel access (F-018).
       if (!(await isWorkspaceAdmin(userId))) {
-        await slack.views.publish({
-          user_id: userId,
-          view: homeMessage('🔒 *Access Review*\n\nOnly workspace Owners and Admins can view the access dashboard. If you need access, please contact a workspace admin.')
-        });
+        await slack.views.publish({ user_id: userId, view: buildMemberHomeView() });
         return;
       }
 

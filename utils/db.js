@@ -94,6 +94,14 @@ async function ensureSchema() {
       data     JSONB NOT NULL
     );
     CREATE INDEX IF NOT EXISTS snapshots_team_time_idx ON snapshots (team_id, taken_at DESC);
+    CREATE TABLE IF NOT EXISTS access_requests (
+      team_id    TEXT NOT NULL,
+      id         TEXT NOT NULL,
+      status     TEXT NOT NULL,
+      data       JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (team_id, id)
+    );
   `);
   console.log('[DB] schema ready');
 }

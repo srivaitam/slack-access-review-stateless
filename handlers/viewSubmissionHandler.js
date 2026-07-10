@@ -10,6 +10,8 @@ const { createCampaign, recordDecision, recordDecisions, getCampaign } = require
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
+const { approverMessage } = require('../modals/accessRequestModal');
+const { createRequest } = require('../services/accessRequestService');
 const { getWorkspacePlan } = require('../services/planService');
 const crypto = require('crypto');
 
@@ -63,6 +65,48 @@ async function handleViewSubmission(payload) {
         }
       };
     }
+  }
+
+  // F-018: a member submitted an access request — route it to the channel owner.
+  // Not admin-gated (members use this).
+  if (callbackId === 'access_request_modal') {
+    const v = payload.view.state.values;
+    const channelId = v.req_channel?.channel?.selected_conversation;
+    const reason = (v.req_reason?.reason?.value || '').trim();
+    const errors = {};
+    if (!channelId) errors.req_channel = 'Pick a channel.';
+    if (reason.length < 10) errors.req_reason = 'Please give a reason of at least 10 characters.';
+    if (Object.keys(errors).length > 0) return { response_action: 'errors', errors };
+
+    const requesterId = payload.user.id;
+    setImmediate(async () => {
+      try {
+        const snapshot = await generateAccessSnapshot();
+        const entry = snapshot.channels.find(c => c.channel.id === channelId);
+        const channelName = entry ? entry.channel.name : channelId;
+        const isPrivate = entry ? entry.channel.is_private : false;
+        if (entry && entry.members.some(m => m.id === requesterId)) {
+          await dmUser(requesterId, { text: `You're already a member of *#${channelName}*.` });
+          return;
+        }
+        const activeIds = new Set(snapshot.users.filter(u => u.active).map(u => u.id));
+        let approverId = entry && entry.channel.creator && activeIds.has(entry.channel.creator) ? entry.channel.creator : null;
+        if (!approverId) { const owner = snapshot.users.find(u => u.active && u.role === 'Owner'); approverId = owner ? owner.id : null; }
+        if (!approverId) { await dmUser(requesterId, { text: `⚠️ Couldn't find an owner to approve access to *#${channelName}*. Please contact a workspace admin.` }); return; }
+
+        const info = await slack.users.info({ user: requesterId });
+        const requester = { id: requesterId, name: info.user.profile.real_name || info.user.name, email: info.user.profile.email || 'unknown' };
+        const req = await createRequest({ channelId, channelName, isPrivate, requester, reason, approverId });
+        await logAuditEvent({ action: 'ACCESS_REQUESTED', actor: requester, target: { channelId, channelName }, result: { approverId }, reason, metadata: { requestId: req.id } });
+        const dm = await slack.conversations.open({ users: approverId });
+        await slack.chat.postMessage({ channel: dm.channel.id, ...approverMessage(req) });
+        await dmUser(requesterId, { text: `✅ Your request for *#${channelName}* was sent to <@${approverId}> for approval.` });
+      } catch (e) {
+        console.error('[REQUEST] submit failed:', e.message);
+        await dmUser(requesterId, { text: '❌ Could not submit your request. Please try again.' });
+      }
+    });
+    return { response_action: 'clear' };
   }
 
   // F-012: attestation / evidence export for a chosen campaign (admin-only).
