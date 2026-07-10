@@ -10,6 +10,8 @@ const { buildInsightsView } = require('../views/insightsView');
 const { buildAttestationModal } = require('../modals/attestationModal');
 const { buildTrendsView } = require('../views/trendsView');
 const { getRecentSummaries, trendSeries, diffSummaries } = require('../services/snapshotHistoryService');
+const { buildFootprintModal } = require('../modals/footprintModal');
+const { userFootprint } = require('../services/governanceService');
 const { buildLoadingView } = require('../views/loadingView');
 const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
@@ -57,7 +59,8 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_insights', 'open_attestation', 'open_trends', 'sort_users', 'toggle_deactivated'
+    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_insights', 'open_attestation', 'open_trends',
+    'open_footprint', 'footprint_user_select', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -147,6 +150,21 @@ async function handleAction(payload) {
     // ─── F-003: create review campaign ───
     if (action === 'create_campaign') {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
+    }
+
+    // ─── F-015: per-user access footprint ───
+    if (action === 'open_footprint') {
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildFootprintModal() });
+    }
+    if (action === 'footprint_user_select') {
+      const selectedUser = payload.actions[0].selected_user;
+      const snapshot = await generateAccessSnapshot();
+      const ua = snapshot.userAccessMap.get(selectedUser);
+      const campaigns = await listCampaigns({ activeOnly: false }).catch(() => []);
+      const internal = getInternalDomains(snapshot.users);
+      const footprint = ua ? userFootprint(ua, campaigns, internal) : null;
+      const viewId = payload.view?.id || payload.container?.view_id;
+      await slack.views.update({ view_id: viewId, view: buildFootprintModal({ selectedUserId: selectedUser, footprint }) });
     }
 
     // ─── F-014: trends & access drift ───

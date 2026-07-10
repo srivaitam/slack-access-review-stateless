@@ -136,8 +136,52 @@ function remediationQueue(campaigns) {
   return { removals, flags, total: removals + flags, items: items.slice(0, 20) };
 }
 
+// F-016: per-campaign review coverage + per-reviewer progress.
+function reviewCoverage(campaign) {
+  const byReviewer = {};
+  let total = 0, decided = 0;
+  for (const ch of campaign.channels || []) {
+    const rid = ch.reviewerId || 'unassigned';
+    const r = byReviewer[rid] || (byReviewer[rid] = { total: 0, decided: 0, channels: 0 });
+    r.channels++;
+    for (const m of ch.members || []) {
+      total++; r.total++;
+      if (ch.decisions && ch.decisions[m.id]) { decided++; r.decided++; }
+    }
+  }
+  const reviewers = Object.entries(byReviewer)
+    .map(([reviewerId, r]) => ({ reviewerId, ...r, percent: r.total ? Math.round((r.decided / r.total) * 100) : 100 }))
+    .sort((a, b) => a.percent - b.percent);
+  return {
+    total, decided,
+    percent: total ? Math.round((decided / total) * 100) : 100,
+    reviewers,
+    overdue: Boolean(campaign.dueDate && campaign.dueDate < new Date().toISOString().slice(0, 10))
+  };
+}
+
+// F-015: one user's full access footprint — every channel, risk, and when it
+// was last reviewed (from campaign decisions).
+function userFootprint(userAccess, campaigns, internalDomains) {
+  const u = userAccess.user;
+  const external = !internalDomains.has(domainOf(u.email));
+  const lastReviewed = {};
+  for (const c of campaigns || []) {
+    for (const ch of c.channels || []) {
+      const d = ch.decisions && ch.decisions[u.id];
+      if (d && (!lastReviewed[ch.id] || d.timestamp > lastReviewed[ch.id])) lastReviewed[ch.id] = d.timestamp;
+    }
+  }
+  const channels = [...(userAccess.channels || [])]
+    .sort((a, b) => (b.riskScore || 0) - (a.riskScore || 0))
+    .map(ch => ({ id: ch.id, name: ch.name, risk: ch.riskScore || 0, is_private: ch.is_private, lastReviewed: lastReviewed[ch.id] || null }));
+  return { user: u, external, aggregateRisk: userAccess.aggregateRiskScore || 0, totalChannels: userAccess.totalChannels || channels.length, channels };
+}
+
 module.exports = {
   isSensitive,
+  reviewCoverage,
+  userFootprint,
   riskDistribution,
   guestExternalReport,
   adminSprawl,

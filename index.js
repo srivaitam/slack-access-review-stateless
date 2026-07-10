@@ -162,6 +162,11 @@ async function start() {
 
   runCampaignRecurrenceCheck();
   setInterval(runCampaignRecurrenceCheck, 24 * 60 * 60 * 1000).unref();
+
+  // F-017: review reminders — interval only (NOT at boot), so a redeploy never
+  // re-sends reminders. Reviewers with pending channels are nudged near/after
+  // the due date; overdue campaigns escalate to the creator.
+  setInterval(runReviewReminderCheck, 24 * 60 * 60 * 1000).unref();
 }
 
 // Run fn once per installed workspace (DB mode), or once in legacy
@@ -224,6 +229,26 @@ async function runCampaignRecurrenceCheck() {
       logError('Campaign recurrence check failed:', e.message);
     }
   }).catch(e => logError('Recurrence sweep failed:', e.message));
+}
+
+// F-017: DM reviewers with pending channels (near/after due date), escalate
+// overdue campaigns to the creator. Runs per installed workspace.
+async function runReviewReminderCheck() {
+  await forEachWorkspace('Review reminders', async () => {
+    try {
+      const { listCampaigns } = require('./services/campaignService');
+      const { sendReviewReminders } = require('./services/reminderService');
+      const active = await listCampaigns({ activeOnly: true });
+      for (const c of active) {
+        const res = await sendReviewReminders(c);
+        if (res.reminded || res.escalated) {
+          logInfo(`Review reminders for "${c.name}": ${res.reminded} reviewer(s)${res.escalated ? ', creator escalated' : ''}`);
+        }
+      }
+    } catch (e) {
+      logError('Review reminder check failed:', e.message);
+    }
+  }).catch(e => logError('Reminder sweep failed:', e.message));
 }
 
 start().catch(err => {

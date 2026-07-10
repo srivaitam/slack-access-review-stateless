@@ -119,6 +119,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
         { type: 'button', text: { type: 'plain_text', text: '📊 Insights' }, action_id: 'open_insights' },
         { type: 'button', text: { type: 'plain_text', text: '📋 Attestation' }, action_id: 'open_attestation' },
         { type: 'button', text: { type: 'plain_text', text: '📈 Trends' }, action_id: 'open_trends' },
+        { type: 'button', text: { type: 'plain_text', text: '👤 Footprint' }, action_id: 'open_footprint' },
         { type: 'button', text: { type: 'plain_text', text: '⚙️ Domains' }, action_id: 'open_domain_settings' },
         ...(plan.canRevoke ? [{ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' }] : []),
         {

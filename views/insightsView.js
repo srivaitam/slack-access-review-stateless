@@ -59,6 +59,18 @@ function buildInsightsView(snapshot, campaigns = []) {
   blocks.push({ type: 'divider' });
   blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*Remediation queue*\n🗑 ${rq.removals} marked for removal  ·  🚩 ${rq.flags} flagged\n_From campaign decisions, awaiting enforcement via Revoke access._` } });
 
+  // Review coverage for active campaigns (F-016).
+  const activeCampaigns = (campaigns || []).filter(c => c.status === 'active');
+  if (activeCampaigns.length) {
+    blocks.push({ type: 'divider' });
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '*Review coverage (active campaigns)*' } });
+    activeCampaigns.slice(0, 3).forEach(c => {
+      const cov = gov.reviewCoverage(c);
+      const behind = cov.reviewers.filter(r => r.percent < 100 && r.reviewerId !== 'unassigned').slice(0, 3).map(r => `<@${r.reviewerId}> ${r.percent}%`).join(', ');
+      blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `*${c.name}* — ${cov.percent}% (${cov.decided}/${cov.total})${cov.overdue ? ' ⏰ overdue' : ''}${behind ? ` · behind: ${behind}` : ''}` }] });
+    });
+  }
+
   return { type: 'home', blocks };
 }
 
