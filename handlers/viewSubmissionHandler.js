@@ -123,8 +123,8 @@ async function handleViewSubmission(payload) {
         await slack.filesUploadV2({
           channel_id: dm.channel.id,
           file: Buffer.from(csv, 'utf-8'),
-          filename: `attestation-${campaign.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${ts}.csv`,
-          title: `Attestation — ${campaign.name}`,
+          filename: `access-review-attestation-${campaign.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase().replace(/^-+|-+$/g, '')}-${ts}.csv`,
+          title: `Access Review — Attestation: ${campaign.name} (${ts})`,
           initial_comment: `📋 *Attestation report — ${campaign.name}*\nStatus: ${metadata.status} · ${metadata.decided}/${metadata.total} memberships reviewed · due ${metadata.dueDate}\n_One row per membership: decision, reviewer, timestamp, justification — audit evidence._`
         });
       } catch (e) {
@@ -210,11 +210,12 @@ async function handleViewSubmission(payload) {
         const { csv, metadata } = await generateMembershipCSV(exportAll ? {} : { channelIds: selected });
         const timestamp = new Date().toISOString().slice(0, 10);
         const skipped = exportAll ? 0 : (selected.length - metadata.exportedChannels);
+        const scope = exportAll ? 'all' : `selected-${metadata.exportedChannels}ch`;
         await slack.filesUploadV2({
           channel_id: dmChannelId,
           file: Buffer.from(csv, 'utf-8'),
-          filename: `channel-audit-${timestamp}.csv`,
-          title: `Channel Audit Export - ${timestamp}`,
+          filename: `access-review-channel-audit-${scope}-${timestamp}.csv`,
+          title: `Access Review — Channel Audit (${exportAll ? 'all channels' : metadata.exportedChannels + ' channels'}, ${timestamp})`,
           initial_comment: `📥 *Channel Audit CSV*\n📢 ${metadata.exportedChannels} channel(s) · 🔗 ${metadata.totalMemberships} membership row(s)` +
             (skipped > 0 ? `\n⚠️ ${skipped} selected channel(s) skipped — not scanned by the app (archived, or the bot isn't a member).` : '') +
             `\n_One row per channel × member — sort by Channel to certify a channel, by Email to certify a person._`

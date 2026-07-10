@@ -259,9 +259,9 @@ async function handleAction(payload) {
       await slack.filesUploadV2({
         channel_id: dmChannelId,
         file: Buffer.from(csv, 'utf-8'),
-        filename: `access-review-${timestamp}.csv`,
-        title: `Access Review Export - ${timestamp}`,
-        initial_comment: `📥 *CSV Export Complete*\n👥 ${metadata.totalUsers} users | 📢 ${metadata.totalChannels} channels`
+        filename: `access-review-users-${timestamp}.csv`,
+        title: `Access Review — Users (${timestamp})`,
+        initial_comment: `📥 *Users CSV export*\n👥 ${metadata.totalUsers} users | 📢 ${metadata.totalChannels} channels\n_One row per user._`
       });
     }
 
