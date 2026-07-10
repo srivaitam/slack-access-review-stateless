@@ -82,6 +82,9 @@ async function generateAccessSnapshot(options = {}) {
     }
   };
   _caches.set(teamId, { at: Date.now(), snapshot });
+  // F-013: persist a compact summary periodically for drift + trends (throttled,
+  // non-blocking). Lazy require avoids a load-order cycle.
+  require('./snapshotHistoryService').captureIfDue(snapshot, teamId).catch(() => {});
   return snapshot;
 }
 

@@ -4,7 +4,7 @@ const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
 const { generateAccessSnapshot, invalidateSnapshotCache } = require('../services/accessService');
-const { generateMembershipCSV } = require('../services/exportService');
+const { generateMembershipCSV, generateAttestationCSV } = require('../services/exportService');
 const { saveInternalDomains } = require('../services/settingsService');
 const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
@@ -48,7 +48,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal' || callbackId === 'attestation_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -63,6 +63,32 @@ async function handleViewSubmission(payload) {
         }
       };
     }
+  }
+
+  // F-012: attestation / evidence export for a chosen campaign (admin-only).
+  if (callbackId === 'attestation_modal') {
+    const campaignId = payload.view.state.values.att_campaign?.campaign?.selected_option?.value;
+    if (!campaignId) return { response_action: 'errors', errors: { att_campaign: 'Pick a campaign to export.' } };
+    setImmediate(async () => {
+      try {
+        const campaign = await getCampaign(campaignId);
+        if (!campaign) { await dmUser(adminId, { text: '⚠️ That campaign could not be found.' }); return; }
+        const { csv, metadata } = generateAttestationCSV(campaign);
+        const dm = await slack.conversations.open({ users: adminId });
+        const ts = new Date().toISOString().slice(0, 10);
+        await slack.filesUploadV2({
+          channel_id: dm.channel.id,
+          file: Buffer.from(csv, 'utf-8'),
+          filename: `attestation-${campaign.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${ts}.csv`,
+          title: `Attestation — ${campaign.name}`,
+          initial_comment: `📋 *Attestation report — ${campaign.name}*\nStatus: ${metadata.status} · ${metadata.decided}/${metadata.total} memberships reviewed · due ${metadata.dueDate}\n_One row per membership: decision, reviewer, timestamp, justification — audit evidence._`
+        });
+      } catch (e) {
+        console.error('[ATTEST] export failed:', e.message);
+        await dmUser(adminId, { text: '❌ Attestation export failed. Please try again.' });
+      }
+    });
+    return { response_action: 'clear' };
   }
 
   // F-009: save internal domains — ticked from the list + any free-text extras

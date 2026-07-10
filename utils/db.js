@@ -87,6 +87,13 @@ async function ensureSchema() {
       data       JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS snapshots (
+      id       BIGSERIAL PRIMARY KEY,
+      team_id  TEXT NOT NULL,
+      taken_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      data     JSONB NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS snapshots_team_time_idx ON snapshots (team_id, taken_at DESC);
   `);
   console.log('[DB] schema ready');
 }

@@ -155,6 +155,50 @@ async function generateMembershipCSV({ channelIds } = {}) {
   };
 }
 
+// F-012: attestation / evidence export for a review campaign. One row per
+// membership: the decision, who reviewed it, when, and the justification —
+// the SOC 2 / ISO access-certification evidence Slack can't produce.
+const ATTESTATION_HEADERS = [
+  'Campaign', 'Channel', 'Channel Risk', 'Member Name', 'Member Email', 'Member Role',
+  'Decision', 'Reviewer', 'Reviewer Email', 'Decided At', 'Justification'
+];
+
+function generateAttestationCSV(campaign) {
+  const rows = [ATTESTATION_HEADERS.join(',')];
+  let total = 0, decided = 0;
+  for (const ch of campaign.channels || []) {
+    for (const m of ch.members || []) {
+      total++;
+      const d = (ch.decisions || {})[m.id];
+      if (d) decided++;
+      rows.push([
+        campaign.name,
+        ch.name,
+        ch.riskScore != null ? ch.riskScore : '',
+        m.name,
+        m.email,
+        m.role,
+        d ? d.decision : 'not reviewed',
+        d ? d.reviewer.name : '',
+        d ? d.reviewer.email : '',
+        d ? d.timestamp : '',
+        d ? (d.justification || '') : ''
+      ].map(csvEscape).join(','));
+    }
+  }
+  return {
+    csv: rows.join('\n'),
+    metadata: {
+      campaign: campaign.name,
+      status: campaign.status,
+      dueDate: campaign.dueDate,
+      total,
+      decided,
+      generatedAt: new Date().toISOString()
+    }
+  };
+}
+
 function csvEscape(val) {
   if (val == null) return '';
   let str = String(val);
@@ -170,4 +214,4 @@ function csvEscape(val) {
   return str;
 }
 
-module.exports = { generateCSV, generateExcelXML, generateMembershipCSV, csvEscape };
+module.exports = { generateCSV, generateExcelXML, generateMembershipCSV, generateAttestationCSV, csvEscape };
