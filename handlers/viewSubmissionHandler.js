@@ -4,7 +4,8 @@ const { slack } = require('../slack/client');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { logAuditEvent } = require('../services/auditService');
 const { generateAccessSnapshot, invalidateSnapshotCache } = require('../services/accessService');
-const { generateMembershipCSV, generateAttestationCSV } = require('../services/exportService');
+const { generateCSV, generateMembershipCSV, generateAttestationCSV } = require('../services/exportService');
+const { buildChannelAuditExportModal } = require('../views/channelBrowserModal');
 const { saveInternalDomains } = require('../services/settingsService');
 const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
@@ -50,7 +51,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal' || callbackId === 'attestation_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal' || callbackId === 'attestation_modal' || callbackId === 'export_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -104,6 +105,33 @@ async function handleViewSubmission(payload) {
       } catch (e) {
         console.error('[REQUEST] submit failed:', e.message);
         await dmUser(requesterId, { text: '❌ Could not submit your request. Please try again.' });
+      }
+    });
+    return { response_action: 'clear' };
+  }
+
+  // F-019: export chooser — Users CSV now, or push the channel-audit picker.
+  if (callbackId === 'export_modal') {
+    const kind = payload.view.state.values.export_kind?.kind?.selected_option?.value;
+    if (kind === 'channel_audit') {
+      return { response_action: 'push', view: buildChannelAuditExportModal() };
+    }
+    setImmediate(async () => {
+      try {
+        const dm = await slack.conversations.open({ users: adminId });
+        await slack.chat.postMessage({ channel: dm.channel.id, text: '⏳ Generating users CSV…' });
+        const { csv, metadata } = await generateCSV();
+        const timestamp = new Date().toISOString().slice(0, 10);
+        await slack.filesUploadV2({
+          channel_id: dm.channel.id,
+          file: Buffer.from(csv, 'utf-8'),
+          filename: `access-review-users-${timestamp}.csv`,
+          title: `Access Review — Users (${timestamp})`,
+          initial_comment: `📥 *Users CSV export*\n👥 ${metadata.totalUsers} users | 📢 ${metadata.totalChannels} channels\n_One row per user._`
+        });
+      } catch (e) {
+        console.error('[EXPORT] users CSV failed:', e.message);
+        await dmUser(adminId, { text: '❌ Users CSV export failed. Please try again.' });
       }
     });
     return { response_action: 'clear' };

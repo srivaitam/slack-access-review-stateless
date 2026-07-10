@@ -122,14 +122,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
         { type: 'button', text: { type: 'plain_text', text: '👤 Footprint' }, action_id: 'open_footprint' },
         { type: 'button', text: { type: 'plain_text', text: '⚙️ Domains' }, action_id: 'open_domain_settings' },
         ...(plan.canRevoke ? [{ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' }] : []),
-        {
-          type: 'overflow',
-          action_id: 'export_menu',
-          options: [
-            { text: { type: 'plain_text', text: '📥 Export users CSV' }, value: 'export_csv' },
-            { text: { type: 'plain_text', text: '📋 Channel audit CSV (choose channels)' }, value: 'export_membership_csv' }
-          ]
-        }
+        { type: 'button', text: { type: 'plain_text', text: '📥 Export' }, action_id: 'open_export' }
       ]
     },
     { type: 'divider' }

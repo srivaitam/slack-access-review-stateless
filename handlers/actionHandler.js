@@ -11,6 +11,7 @@ const { buildDomainSettingsModal } = require('../modals/domainSettingsModal');
 const { getInternalDomainsSetting } = require('../services/settingsService');
 const { buildInsightsView } = require('../views/insightsView');
 const { buildAttestationModal } = require('../modals/attestationModal');
+const { buildExportModal } = require('../modals/exportModal');
 const { buildTrendsView } = require('../views/trendsView');
 const { getRecentSummaries, trendSeries, diffSummaries } = require('../services/snapshotHistoryService');
 const { buildFootprintModal } = require('../modals/footprintModal');
@@ -73,7 +74,7 @@ async function handleAction(payload) {
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
     'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_insights', 'open_attestation', 'open_trends',
-    'open_footprint', 'footprint_user_select', 'sort_users', 'toggle_deactivated'
+    'open_footprint', 'footprint_user_select', 'open_export', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -186,6 +187,11 @@ async function handleAction(payload) {
       const series = trendSeries(summaries);
       const drift = summaries.length >= 2 ? diffSummaries(summaries[1], summaries[0]) : null;
       await slack.views.publish({ user_id: userId, view: buildTrendsView(series, drift) });
+    }
+
+    // ─── F-019: export chooser (replaces the ⋯ overflow) ───
+    if (action === 'open_export') {
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildExportModal() });
     }
 
     // ─── F-012: attestation / evidence export — pick a campaign ───
