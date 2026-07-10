@@ -34,6 +34,7 @@ function buildRevokeAccessModal({ selectedUserId = null, channels = null } = {})
     blocks.push({
       type: 'input',
       block_id: 'revoke_channels',
+      optional: true,
       label: { type: 'plain_text', text: `Channels to remove them from (${channels.length})` },
       element: {
         type: 'multi_static_select',
@@ -45,6 +46,18 @@ function buildRevokeAccessModal({ selectedUserId = null, channels = null } = {})
     if (channels.length > 100) {
       blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `Showing the first 100 of ${channels.length} channels.` }] });
     }
+    // F-010: offboarding — one tick removes them from every channel the app sees.
+    blocks.push({
+      type: 'input',
+      block_id: 'revoke_offboard',
+      optional: true,
+      label: { type: 'plain_text', text: 'Offboarding' },
+      element: {
+        type: 'checkboxes',
+        action_id: 'offboard',
+        options: [{ text: { type: 'plain_text', text: `Remove from ALL ${channels.length} of their channels` }, value: 'all' }]
+      }
+    });
   }
 
   blocks.push({

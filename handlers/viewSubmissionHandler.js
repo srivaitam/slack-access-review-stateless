@@ -165,13 +165,21 @@ async function handleViewSubmission(payload) {
     let revMeta = {};
     try { revMeta = JSON.parse(payload.view.private_metadata || '{}'); } catch (e) { /* no metadata */ }
     const targetUserId = revMeta.userId || v.revoke_user?.revoke_user_select?.selected_user;
-    const channelIds = (v.revoke_channels?.channels?.selected_options || []).map(o => o.value);
+    let channelIds = (v.revoke_channels?.channels?.selected_options || []).map(o => o.value);
+    const offboard = (v.revoke_offboard?.offboard?.selected_options?.length || 0) > 0;
     const reason = (v.revoke_reason?.reason?.value || '').trim();
     const notifyUser = (v.revoke_notify?.notify?.selected_options?.length || 0) > 0;
 
+    // F-010: offboarding expands to every channel the app can see for this user.
+    if (offboard && targetUserId) {
+      const snap = await generateAccessSnapshot().catch(() => null);
+      const ua = snap && snap.userAccessMap.get(targetUserId);
+      if (ua) channelIds = ua.channels.map(c => c.id);
+    }
+
     const errors = {};
     if (!targetUserId) errors.revoke_reason = 'Pick a user at the top first — their channels will load.';
-    else if (channelIds.length === 0) errors.revoke_channels = 'Select at least one channel.';
+    else if (channelIds.length === 0) errors.revoke_channels = offboard ? 'This user has no channels the app can remove them from.' : 'Select at least one channel.';
     if (reason.length < 10) errors.revoke_reason = 'Please give a reason of at least 10 characters.';
     if (Object.keys(errors).length > 0) return { response_action: 'errors', errors };
 

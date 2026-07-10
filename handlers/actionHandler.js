@@ -6,6 +6,7 @@ const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
 const { getWorkspacePlan } = require('../services/planService');
 const { buildDomainSettingsModal } = require('../modals/domainSettingsModal');
 const { getInternalDomainsSetting } = require('../services/settingsService');
+const { buildInsightsView } = require('../views/insightsView');
 const { buildLoadingView } = require('../views/loadingView');
 const { generateCSV, generateExcelXML } = require('../services/exportService');
 const { isWorkspaceAdmin } = require('../utils/authz');
@@ -53,7 +54,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'sort_users', 'toggle_deactivated'
+    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_insights', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
     await slack.chat.postMessage({
@@ -143,6 +144,13 @@ async function handleAction(payload) {
     // ─── F-003: create review campaign ───
     if (action === 'create_campaign') {
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildCampaignCreateModal() });
+    }
+
+    // ─── F-011: governance insights dashboard ───
+    if (action === 'open_insights') {
+      const snapshot = await generateAccessSnapshot();
+      const campaigns = await listCampaigns({ activeOnly: false }).catch(() => []);
+      await slack.views.publish({ user_id: userId, view: buildInsightsView(snapshot, campaigns) });
     }
 
     // ─── F-009: configure internal/external domains ───
