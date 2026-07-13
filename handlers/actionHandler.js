@@ -488,7 +488,10 @@ async function handleReviewHome(payload) {
       if (!isAdmin) return reviewNotice(userId, '🔒 Only workspace Owners and Admins can open the access dashboard.');
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
-      await slack.views.publish({ user_id: userId, view: buildAccessOverviewView(snapshot, 'riskScore', campaigns) });
+      // Must pass the plan — without it the header falls back to "Unknown" and
+      // the Revoke button disappears until you hit Refresh.
+      const plan = await getWorkspacePlan().catch(() => ({}));
+      await slack.views.publish({ user_id: userId, view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan }) });
       return;
     }
 

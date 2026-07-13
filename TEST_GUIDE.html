@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access Review — Simple Test Guide</title>
+<style>
+  :root{--bg:#f6f7fb;--panel:#fff;--ink:#1c2331;--muted:#5b6472;--line:#e5e8f0;--brand:#1d2a57;--ok:#0f7a52;--warn:#a4610b;--chip:#eef1fa;--r:12px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  header.top{background:var(--brand);color:#fff;padding:24px 28px}
+  header.top h1{margin:0 0 4px;font-size:23px}
+  header.top p{margin:0;color:#c7d0ea}
+  .bar{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);padding:10px 28px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+  .bar input{flex:1;min-width:200px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  .prog{font-size:13.5px;color:var(--muted);white-space:nowrap}
+  .prog b{color:var(--ok)}
+  .btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 12px;font-size:13.5px;cursor:pointer}
+  .btn:hover{background:var(--chip)}
+  main{max-width:940px;margin:0 auto;padding:22px 24px 60px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin:0 0 16px}
+  section h2{margin:0 0 12px;font-size:18px;color:var(--brand)}
+  .test{border-top:1px solid var(--line);padding:12px 0}
+  .test:first-of-type{border-top:0}
+  .test label{display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-weight:600}
+  .test input{margin-top:4px;width:17px;height:17px;flex:none;cursor:pointer}
+  .test p{margin:6px 0 0 27px;font-size:14.5px}
+  .do b{color:var(--brand)}
+  .exp b{color:var(--ok)}
+  .test.done label{color:var(--muted);text-decoration:line-through}
+  .setup li{margin:6px 0}
+  .note{border-left:3px solid var(--warn);background:#fff7ec;padding:10px 14px;border-radius:0 8px 8px 0;margin:10px 0;font-size:14px}
+  code{background:#eef1f6;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px ui-monospace,Menlo,Consolas,monospace}
+  footer{max-width:940px;margin:0 auto;padding:0 24px 40px;color:var(--muted);font-size:13px}
+  @media print{.bar{display:none}.test input{display:none}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Access Review — Simple Test Guide</h1>
+  <p>Follow each step. Tick the box when it works.</p>
+</header>
+
+<div class="bar">
+  <input id="filter" placeholder="Search a test… (e.g. revoke, export, guest)">
+  <span class="prog"><b id="done">0</b> of <span id="total">0</span> done</span>
+  <button class="btn" id="reset">Clear all ticks</button>
+</div>
+
+<main>
+
+<section class="setup" data-k="setup before you start prerequisites">
+  <h2>Before you start</h2>
+  <ul>
+    <li>Deploy the latest code and wait until Render says the app is <b>Live</b>.</li>
+    <li>Log in to Slack as a <b>Workspace Owner or Admin</b>.</li>
+    <li>Turn on the Slack setting that lets the app remove people: <b>Workspace settings → Roles &amp; permissions → Account types → "Remove other members from public channels" → Everyone</b>.</li>
+    <li>For any <b>private</b> channel you want to test, type <code>/invite @AccessReview</code> inside that channel first. (Slack does not let a bot join a private channel by itself.)</li>
+    <li>Have a few test people ready: one from <b>your company domain</b>, one from an <b>outside domain</b> (like gmail), one <b>guest</b>, and one <b>deactivated</b> person.</li>
+    <li>Have a second Slack account that is <b>NOT an admin</b> — you'll need it for the "request access" tests.</li>
+  </ul>
+  <div class="note">Tip: create one test channel that is public and one that is private, and put your test people in them. That makes every test below easy to run.</div>
+</section>
+
+<section data-k="dashboard home plan refresh sort browse channels">
+  <h2>1. The dashboard</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T1 — Open the dashboard</span></label>
+    <p class="do"><b>Do this:</b> In Slack, click <b>Apps → Access Review → Home</b> tab.</p>
+    <p class="exp"><b>You should see:</b> A dashboard with total members, channels, admins, guests, deactivated people, and a list of members sorted by risk.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T2 — See your Slack plan</span></label>
+    <p class="do"><b>Do this:</b> Look near the top of the dashboard.</p>
+    <p class="exp"><b>You should see:</b> A line like <b>Plan: Business+</b> (or Pro / Enterprise Grid / Unknown).</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T3 — Refresh the data</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Refresh</b>.</p>
+    <p class="exp"><b>You should see:</b> A short loading message, then fresh numbers with a new "last updated" time.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T4 — Sort the member list</span></label>
+    <p class="do"><b>Do this:</b> Use the <b>Sort</b> dropdown and pick risk, then name, then role.</p>
+    <p class="exp"><b>You should see:</b> The member list reorders each time.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T5 — Show deactivated people</span></label>
+    <p class="do"><b>Do this:</b> Scroll down and click <b>Show</b> next to the hidden deactivated members.</p>
+    <p class="exp"><b>You should see:</b> Deactivated people appear. Clicking <b>Hide</b> puts them away again.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T6 — Browse channels</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Browse channels</b> and pick a channel.</p>
+    <p class="exp"><b>You should see:</b> The channel's risk score and its member list, with guest / external / deactivated labels.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T7 — View a person from Browse channels</span></label>
+    <p class="do"><b>Do this:</b> In that member list, click <b>View Access</b> next to someone.</p>
+    <p class="exp"><b>You should see:</b> A new window opens showing that person's channels. (Earlier this button did nothing — it must work now.)</p></div>
+</section>
+
+<section data-k="domains internal external gmail company">
+  <h2>2. Internal / external domains</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T8 — Open the Domains screen</span></label>
+    <p class="do"><b>Do this:</b> On the dashboard, click <b>⚙️ Domains</b>.</p>
+    <p class="exp"><b>You should see:</b> A list of every email domain in your workspace with the number of people on each (most common first).</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T9 — Mark your company domain as internal</span></label>
+    <p class="do"><b>Do this:</b> Untick <b>gmail.com</b>, tick <b>your company domain</b>, and click <b>Save</b>.</p>
+    <p class="exp"><b>You should see:</b> A message saying the domains were saved.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T10 — Check the external labels changed</span></label>
+    <p class="do"><b>Do this:</b> Go back to the dashboard and click <b>Refresh</b>. Then open Browse channels.</p>
+    <p class="exp"><b>You should see:</b> Gmail people are now marked <b>external</b>, and your company people are not. Risk scores may change too.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T11 — Add a domain that is not in the list</span></label>
+    <p class="do"><b>Do this:</b> Open Domains, type another domain (like <code>yourcompany.io</code>) in the "add other domains" box, and Save.</p>
+    <p class="exp"><b>You should see:</b> It is saved as internal too.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T12 — Type a wrong domain</span></label>
+    <p class="do"><b>Do this:</b> Type something invalid like <code>notadomain</code> and Save.</p>
+    <p class="exp"><b>You should see:</b> A red error saying it is not a valid domain.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T13 — Go back to automatic</span></label>
+    <p class="do"><b>Do this:</b> Untick everything, clear the text box, Save.</p>
+    <p class="exp"><b>You should see:</b> A message saying it will auto-detect the most common domain again.</p></div>
+</section>
+
+<section data-k="campaign review reviewer queue keep remove flag">
+  <h2>3. Review campaigns</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T14 — Start a review campaign</span></label>
+    <p class="do"><b>Do this:</b> Click <b>New review campaign</b>. Give it a name, pick a scope, pick a due date, click Launch.</p>
+    <p class="exp"><b>You should see:</b> A message telling you it launched, and the campaign appears on the dashboard with a progress bar.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T15 — Reviewers get a message</span></label>
+    <p class="do"><b>Do this:</b> Check the direct messages from the app.</p>
+    <p class="exp"><b>You should see:</b> Each channel's reviewer got a message listing the people to review.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T16 — The message has a queue button</span></label>
+    <p class="do"><b>Do this:</b> Look at the top of that message.</p>
+    <p class="exp"><b>You should see:</b> A blue button: <b>📋 Open my review queue</b>.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T17 — Open your review queue</span></label>
+    <p class="do"><b>Do this:</b> Click that button (or click <b>Open review</b> on the dashboard).</p>
+    <p class="exp"><b>You should see:</b> A list of your channels, each with a progress bar and how many people still need attention.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T18 — Open one channel</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Review</b> on a channel.</p>
+    <p class="exp"><b>You should see:</b> The people in that channel with tick boxes, filter buttons, and a "per page" dropdown.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T19 — Change how many people per page</span></label>
+    <p class="do"><b>Do this:</b> Change the dropdown from 25 to 10, then to 50.</p>
+    <p class="exp"><b>You should see:</b> The list gets shorter or longer, and the "Showing 1–25 of N" line updates.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T20 — Show only people who need attention</span></label>
+    <p class="do"><b>Do this:</b> Click the <b>Needs attention</b> filter.</p>
+    <p class="exp"><b>You should see:</b> Only guests, external people, deactivated people and admins are shown.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T21 — Tick everyone on the page and keep them</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Select all on page</b>, then click <b>Keep selected</b>.</p>
+    <p class="exp"><b>You should see:</b> All of them are marked <b>Kept</b> and the progress goes up.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T22 — Keep all the normal people in one click</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Keep all remaining routine</b> and confirm.</p>
+    <p class="exp"><b>You should see:</b> Everyone without a warning label is kept. Only guests/external/deactivated/admins are left to decide.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T23 — Mark someone for removal</span></label>
+    <p class="do"><b>Do this:</b> Tick one person, click <b>Revoke selected</b>, type a reason (10+ letters), submit.</p>
+    <p class="exp"><b>You should see:</b> The person is marked for removal. (This is only a decision — it does NOT remove them from Slack yet.)</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T24 — Flag someone</span></label>
+    <p class="do"><b>Do this:</b> Tick one person, click <b>Flag selected</b>, type a reason, submit.</p>
+    <p class="exp"><b>You should see:</b> The person is marked as flagged.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T25 — Move between pages</span></label>
+    <p class="do"><b>Do this:</b> In a channel with many people, click <b>Next ›</b> and then <b>‹ Prev</b>.</p>
+    <p class="exp"><b>You should see:</b> The page changes and the counter updates.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T26 — Finish the whole campaign</span></label>
+    <p class="do"><b>Do this:</b> Decide the last remaining person in the last channel.</p>
+    <p class="exp"><b>You should see:</b> The campaign becomes <b>completed</b>, and the person who started it gets a "campaign complete" message with the totals.</p></div>
+</section>
+
+<section data-k="reminders overdue escalation">
+  <h2>4. Reminders</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T27 — Reviewer gets a reminder</span></label>
+    <p class="do"><b>Do this:</b> Have a campaign whose due date is close, with people still not reviewed. Wait for the daily check.</p>
+    <p class="exp"><b>You should see:</b> The reviewer gets a reminder message listing their unfinished channels, with a button to open their queue.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T28 — Late campaign is escalated</span></label>
+    <p class="do"><b>Do this:</b> Let a campaign pass its due date with work still pending.</p>
+    <p class="exp"><b>You should see:</b> The person who created the campaign gets a message saying it is overdue and how many reviewers are still pending.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T29 — No reminders after it is done</span></label>
+    <p class="do"><b>Do this:</b> Finish a campaign completely and wait for the next daily check.</p>
+    <p class="exp"><b>You should see:</b> No reminder messages for that campaign.</p></div>
+</section>
+
+<section data-k="coverage progress behind reviewers">
+  <h2>5. Review coverage</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T30 — See who is behind</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📊 Insights</b> and scroll to <b>Review coverage</b>.</p>
+    <p class="exp"><b>You should see:</b> For each running campaign: the percent finished, whether it is late, and the names of reviewers who are behind.</p></div>
+</section>
+
+<section data-k="attestation evidence audit report csv">
+  <h2>6. Attestation report (evidence)</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T31 — Download the attestation report</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📋 Attestation</b>, pick a campaign, click Export.</p>
+    <p class="exp"><b>You should see:</b> A CSV file arrives in your direct messages, named like <code>access-review-attestation-…csv</code>.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T32 — Check what is inside</span></label>
+    <p class="do"><b>Do this:</b> Open the CSV.</p>
+    <p class="exp"><b>You should see:</b> One row per person per channel, showing the decision, who reviewed it, the date, and the reason. People not yet reviewed say <b>not reviewed</b>.</p></div>
+</section>
+
+<section data-k="revoke remove offboard private public">
+  <h2>7. Removing access (revoke &amp; offboard)</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T33 — The Revoke button is there</span></label>
+    <p class="do"><b>Do this:</b> Look at the dashboard buttons.</p>
+    <p class="exp"><b>You should see:</b> A red <b>Revoke access</b> button. (On Free/Pro it is hidden on purpose.)</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T34 — Pick a person and see their channels</span></label>
+    <p class="do"><b>Do this:</b> Click <b>Revoke access</b> and choose a person.</p>
+    <p class="exp"><b>You should see:</b> The window reloads and shows a list of <b>only that person's channels</b>.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T35 — Remove them from one channel</span></label>
+    <p class="do"><b>Do this:</b> Pick one channel, type a reason (10+ letters), click Revoke.</p>
+    <p class="exp"><b>You should see:</b> First a "⏳ Revoking…" message, then a result message saying 1 succeeded. The person is out of the channel.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T36 — Remove from a public channel</span></label>
+    <p class="do"><b>Do this:</b> Repeat on a public channel.</p>
+    <p class="exp"><b>You should see:</b> It works. (If it fails with a "workspace setting" message, turn on the Slack permission from the setup section.)</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T37 — Remove from a private channel (bot is inside)</span></label>
+    <p class="do"><b>Do this:</b> Use a private channel where you already ran <code>/invite @AccessReview</code>.</p>
+    <p class="exp"><b>You should see:</b> It works.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T38 — Private channel where the bot is NOT inside</span></label>
+    <p class="do"><b>Do this:</b> Try a private channel the bot was never invited to.</p>
+    <p class="exp"><b>You should see:</b> A clear message telling you to run <code>/invite @AccessReview</code> in that channel first.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T39 — Remove everything (offboarding)</span></label>
+    <p class="do"><b>Do this:</b> In the Revoke window, pick a person and tick <b>Remove from ALL their channels</b>. Add a reason and Revoke.</p>
+    <p class="exp"><b>You should see:</b> The person is removed from every channel the app can see, and the result message shows the count.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T40 — Check the record was kept</span></label>
+    <p class="do"><b>Do this:</b> Look at the result message.</p>
+    <p class="exp"><b>You should see:</b> An <b>Audit ID</b> at the bottom — proof the action was recorded.</p></div>
+</section>
+
+<section data-k="request approval owner member join">
+  <h2>8. Requesting access (for normal members)</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T41 — A normal member opens the app</span></label>
+    <p class="do"><b>Do this:</b> Log in with your <b>non-admin</b> account and open the app's Home tab.</p>
+    <p class="exp"><b>You should see:</b> A simple page with a green <b>➕ Request channel access</b> button (not a "only admins" message).</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T42 — Send a request</span></label>
+    <p class="do"><b>Do this:</b> Click the button, pick a channel, type why you need it (10+ letters), click Request.</p>
+    <p class="exp"><b>You should see:</b> You get "your request was sent", and the <b>channel owner</b> gets a message with <b>Approve</b> and <b>Deny</b> buttons.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T43 — Owner approves</span></label>
+    <p class="do"><b>Do this:</b> As the owner, click <b>✅ Approve</b>.</p>
+    <p class="exp"><b>You should see:</b> The person is added to the channel, both people get a message, and the owner's message changes to "Approved".</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T44 — Owner denies</span></label>
+    <p class="do"><b>Do this:</b> Send another request and click <b>🚫 Deny</b>.</p>
+    <p class="exp"><b>You should see:</b> The requester is told it was denied, and the message changes to "Denied".</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T45 — Ask for a channel you are already in</span></label>
+    <p class="do"><b>Do this:</b> Request a channel you are already a member of.</p>
+    <p class="exp"><b>You should see:</b> A message saying you are already a member. No request is created.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T46 — Someone else tries to approve</span></label>
+    <p class="do"><b>Do this:</b> Have a different non-admin person click Approve on a request that is not theirs.</p>
+    <p class="exp"><b>You should see:</b> A message saying only the channel owner or an admin can decide.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T47 — Try to decide twice</span></label>
+    <p class="do"><b>Do this:</b> After approving, click Deny on the same message.</p>
+    <p class="exp"><b>You should see:</b> A message saying it was already handled. Nothing happens twice.</p></div>
+</section>
+
+<section data-k="insights policy risk guests admins orphaned separation">
+  <h2>9. Insights</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T48 — Open Insights</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📊 Insights</b>.</p>
+    <p class="exp"><b>You should see:</b> Risk counts (Critical / High / Medium / Low) and the riskiest channels.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T49 — Guests and outside people</span></label>
+    <p class="do"><b>Do this:</b> Read the "Guests &amp; external" part.</p>
+    <p class="exp"><b>You should see:</b> How many guests, how many are only in one channel, how many outside people, and the top outside domains.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T50 — Admins in sensitive channels</span></label>
+    <p class="do"><b>Do this:</b> Read the "Admins" part.</p>
+    <p class="exp"><b>You should see:</b> How many admins you have and which sensitive channels they sit in.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T51 — Channels with no owner</span></label>
+    <p class="do"><b>Do this:</b> Read "Orphaned channels".</p>
+    <p class="exp"><b>You should see:</b> Channels whose creator left, or that have no active admin.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T52 — Conflicting duties</span></label>
+    <p class="do"><b>Do this:</b> Read "Separation of duties".</p>
+    <p class="exp"><b>You should see:</b> Anyone who is in both a "request" channel and an "approval" channel (or "none found").</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T53 — Rule breaks</span></label>
+    <p class="do"><b>Do this:</b> Read "Policy violations".</p>
+    <p class="exp"><b>You should see:</b> Warnings such as outside people in sensitive channels, private channels with too many admins, and deactivated people still sitting in channels.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T54 — Work still to do</span></label>
+    <p class="do"><b>Do this:</b> Read "Remediation queue".</p>
+    <p class="exp"><b>You should see:</b> How many people were marked for removal or flagged in reviews and still need action.</p></div>
+</section>
+
+<section data-k="trends drift history joined left">
+  <h2>10. Trends &amp; changes over time</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T55 — First time you open it</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📈 Trends</b> on a fresh install.</p>
+    <p class="exp"><b>You should see:</b> A message saying there is no history yet.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T56 — After a day or two</span></label>
+    <p class="do"><b>Do this:</b> Use the app for a couple of days, then open Trends again.</p>
+    <p class="exp"><b>You should see:</b> Numbers over time (members, channels, outside people, guests) with ▲ / ▼ arrows showing the change.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T57 — See what changed</span></label>
+    <p class="do"><b>Do this:</b> Read the "Access drift" part.</p>
+    <p class="exp"><b>You should see:</b> How many people joined or left channels, the change in outside people, and any channel that became high risk.</p></div>
+</section>
+
+<section data-k="footprint per user access channels last reviewed">
+  <h2>11. One person's full access</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T58 — Look up a person</span></label>
+    <p class="do"><b>Do this:</b> Click <b>👤 Footprint</b> and choose a person.</p>
+    <p class="exp"><b>You should see:</b> Their risk score, whether they are external, and every channel they can access with the channel's risk and when it was last reviewed.</p></div>
+</section>
+
+<section data-k="export csv users channel audit file name">
+  <h2>12. Exports (CSV files)</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T59 — Export the users list</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📥 Export</b>, choose <b>Users CSV</b>, click Next.</p>
+    <p class="exp"><b>You should see:</b> A file in your messages named <code>access-review-users-&lt;date&gt;.csv</code> with one row per person.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T60 — Export only some channels</span></label>
+    <p class="do"><b>Do this:</b> Click <b>📥 Export</b>, choose <b>Channel audit CSV</b>, Next, pick 2–3 channels, Export.</p>
+    <p class="exp"><b>You should see:</b> A file named <code>access-review-channel-audit-selected-3ch-&lt;date&gt;.csv</code> containing only those channels.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T61 — Export every channel</span></label>
+    <p class="do"><b>Do this:</b> Same as above, but tick <b>Export ALL scanned channels</b>.</p>
+    <p class="exp"><b>You should see:</b> A file named <code>access-review-channel-audit-all-&lt;date&gt;.csv</code> with every channel.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T62 — The ⋯ menu is gone</span></label>
+    <p class="do"><b>Do this:</b> Look at the dashboard buttons.</p>
+    <p class="exp"><b>You should see:</b> No three-dots (⋯) menu — just the <b>📥 Export</b> button.</p></div>
+</section>
+
+<section data-k="audit chain integrity reseal logs">
+  <h2>13. The audit record</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T63 — The record is healthy</span></label>
+    <p class="do"><b>Do this:</b> Open your Render logs.</p>
+    <p class="exp"><b>You should see:</b> A line like <b>Audit chain OK: N entries</b>. You should NOT see "AUDIT CHAIN BROKEN".</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T64 — Actions get recorded</span></label>
+    <p class="do"><b>Do this:</b> Do one revoke or one approval, then check the logs again.</p>
+    <p class="exp"><b>You should see:</b> A new entry was added and the chain is still OK.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T65 — Repair tool works (only if needed)</span></label>
+    <p class="do"><b>Do this:</b> In the Render shell run <code>node scripts/reseal-audit-chain.js --yes</code>.</p>
+    <p class="exp"><b>You should see:</b> Lines saying it re-sealed each workspace and <b>verify: OK</b>.</p></div>
+</section>
+
+<section data-k="plan gate revoke enabled unknown">
+  <h2>14. Plan and the revoke gate</h2>
+
+  <div class="test"><label><input type="checkbox"><span>T66 — Plan shows correctly</span></label>
+    <p class="do"><b>Do this:</b> Look at the plan line on the dashboard.</p>
+    <p class="exp"><b>You should see:</b> Your real plan (e.g. Business+). If it says <b>Unknown</b>, the app could not read the plan — that is OK.</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T67 — Unknown plan does not block you</span></label>
+    <p class="do"><b>Do this:</b> If the plan says Unknown, check whether the Revoke button is still there.</p>
+    <p class="exp"><b>You should see:</b> The <b>Revoke access</b> button is still available (it no longer hides itself when the plan can't be read).</p></div>
+
+  <div class="test"><label><input type="checkbox"><span>T68 — Force revoke on (if you ever need it)</span></label>
+    <p class="do"><b>Do this:</b> In Render, add the setting <code>REVOKE_ENABLED=true</code> and save.</p>
+    <p class="exp"><b>You should see:</b> After it redeploys, the Revoke button is always shown, whatever the plan says.</p></div>
+</section>
+
+</main>
+
+<footer>Tick each box as it passes. Anything that fails — note the test number and what you saw.</footer>
+
+<script>
+  var boxes = Array.prototype.slice.call(document.querySelectorAll('.test input'));
+  document.getElementById('total').textContent = boxes.length;
+  function refresh(){
+    var n = boxes.filter(function(b){return b.checked;}).length;
+    document.getElementById('done').textContent = n;
+    boxes.forEach(function(b){ b.closest('.test').classList.toggle('done', b.checked); });
+  }
+  boxes.forEach(function(b){ b.addEventListener('change', refresh); });
+  document.getElementById('reset').addEventListener('click', function(){
+    boxes.forEach(function(b){ b.checked = false; });
+    refresh();
+  });
+  var f = document.getElementById('filter');
+  f.addEventListener('input', function(){
+    var q = f.value.trim().toLowerCase();
+    document.querySelectorAll('main section').forEach(function(sec){
+      var secHay = ((sec.getAttribute('data-k')||'') + ' ' + sec.textContent).toLowerCase();
+      var anyShown = false;
+      sec.querySelectorAll('.test').forEach(function(t){
+        var show = !q || t.textContent.toLowerCase().indexOf(q) !== -1;
+        t.style.display = show ? '' : 'none';
+        if (show) anyShown = true;
+      });
+      var hasTests = sec.querySelectorAll('.test').length > 0;
+      sec.style.display = (!q || anyShown || (!hasTests && secHay.indexOf(q) !== -1)) ? '' : 'none';
+    });
+  });
+  refresh();
+</script>
+</body>
+</html>

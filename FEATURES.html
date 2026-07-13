@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access Review — Feature Guide</title>
+<style>
+  :root{
+    --bg:#f6f7fb; --panel:#ffffff; --ink:#1c2331; --muted:#5b6472; --line:#e5e8f0;
+    --brand:#1d2a57; --brand2:#2f5bd0; --ok:#0f7a52; --warn:#a4610b; --danger:#a32d2d;
+    --chip:#eef1fa; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+  a{color:var(--brand2);text-decoration:none}
+  header.top{background:var(--brand);color:#fff;padding:26px 28px}
+  header.top h1{margin:0 0 4px;font-size:24px}
+  header.top p{margin:0;color:#c7d0ea}
+  .wrap{display:flex;gap:24px;max-width:1180px;margin:0 auto;padding:24px}
+  nav.toc{position:sticky;top:16px;align-self:flex-start;width:270px;min-width:270px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;max-height:calc(100vh - 40px);overflow:auto}
+  nav.toc input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:14px;margin-bottom:10px}
+  nav.toc a{display:block;padding:6px 8px;border-radius:7px;color:var(--ink);font-size:13.5px}
+  nav.toc a:hover{background:var(--chip)}
+  nav.toc a.active{background:var(--chip);color:var(--brand);font-weight:600}
+  nav.toc .grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 6px 4px}
+  main{flex:1;min-width:0}
+  section.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin:0 0 18px}
+  section.card h2{margin:0 0 2px;font-size:19px;color:var(--brand);display:flex;align-items:center;gap:10px}
+  section.card .sub{color:var(--muted);font-size:13px;margin:0 0 14px}
+  h3.k{margin:16px 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  ul{margin:6px 0 6px 2px;padding-left:20px}
+  li{margin:3px 0}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .chip{background:var(--chip);color:var(--brand);border-radius:999px;padding:3px 11px;font-size:12.5px}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px}
+  .pill.admin{background:#eef1fa;color:var(--brand)}
+  .pill.member{background:#e6f5ee;color:var(--ok)}
+  .pill.auto{background:#fbeede;color:var(--warn)}
+  code{background:#eef1f6;border:1px solid var(--line);border-radius:5px;padding:1px 6px;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace}
+  .note{border-left:3px solid var(--brand2);background:#f2f6ff;padding:10px 14px;border-radius:0 8px 8px 0;margin:12px 0;font-size:14px}
+  .warn{border-left-color:var(--warn);background:#fff7ec}
+  table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f2f4fa}
+  footer{max-width:1180px;margin:0 auto;padding:10px 24px 40px;color:var(--muted);font-size:13px}
+  @media(max-width:860px){.wrap{flex-direction:column}nav.toc{position:static;width:auto;min-width:0;max-height:none}}
+  @media print{nav.toc{display:none}.wrap{display:block}body{background:#fff}}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Slack Access Review — Feature Guide</h1>
+  <p>What each feature is, how it works, and how the pieces fit together.</p>
+</header>
+
+<div class="wrap">
+<nav class="toc" id="toc">
+  <input id="filter" placeholder="Filter features…" autocomplete="off">
+  <div class="grp">Foundations</div>
+  <a href="#overview">Overview &amp; who uses it</a>
+  <a href="#dashboard">The admin dashboard</a>
+  <a href="#snapshot">Access snapshot &amp; risk scoring</a>
+  <a href="#domains">Internal / external domains</a>
+  <div class="grp">Review &amp; certify</div>
+  <a href="#campaigns">Access review campaigns</a>
+  <a href="#queue">Reviewer queue &amp; bulk decisions</a>
+  <a href="#reminders">Reminders &amp; escalation</a>
+  <a href="#coverage">Review coverage</a>
+  <a href="#attestation">Attestation / evidence export</a>
+  <div class="grp">Act</div>
+  <a href="#revoke">Revocation &amp; offboarding</a>
+  <a href="#requests">Access request &amp; approval</a>
+  <div class="grp">Insight</div>
+  <a href="#insights">Governance insights</a>
+  <a href="#trends">Trends &amp; access drift</a>
+  <a href="#footprint">Per-user access footprint</a>
+  <a href="#exports">Exports (CSV)</a>
+  <div class="grp">Trust &amp; setup</div>
+  <a href="#audit">Tamper-evident audit trail</a>
+  <a href="#plan">Plan detection &amp; gating</a>
+  <a href="#security">Security &amp; data model</a>
+  <a href="#config">Configuration reference</a>
+</nav>
+
+<main>
+
+<section class="card" id="overview" data-k="overview what is app purpose">
+  <h2>🔐 Overview &amp; who uses it</h2>
+  <p class="sub">What the application is for.</p>
+  <h3 class="k">What it is</h3>
+  <p>A Slack app that turns Slack's raw channels and memberships into a governed access-review programme: it scores risk, runs periodic reviews with sign-off, enforces removals, records a tamper-evident evidence trail, and lets members request access through an approval flow — the governance layer Slack itself doesn't provide.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li><b>Admins</b> open the app's <b>Home tab</b> to get the dashboard (members, channels, risk, and all tools).</li>
+    <li><b>Members</b> open the same app and get a lightweight home where they can <b>request channel access</b>.</li>
+    <li>The app is multi-workspace: each installing workspace has its own bot token and its data is isolated by <code>team_id</code>.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">The admin dashboard</span><span class="chip">Access request &amp; approval</span><span class="chip">Security &amp; data model</span></div>
+</section>
+
+<section class="card" id="dashboard" data-k="dashboard home tab buttons admin">
+  <h2>🏠 The admin dashboard</h2>
+  <p class="sub"><span class="pill admin">Admins &amp; Owners only</span></p>
+  <h3 class="k">What it is</h3>
+  <p>The App Home tab for admins — a live snapshot of the workspace plus one-click entry points to every tool.</p>
+  <h3 class="k">How it works</h3>
+  <p>On open it scans the workspace (cached for a short time) and shows totals (members, channels, admins/owners, guests, deactivated, high-risk users), the detected <b>plan</b>, active campaigns, and each member sorted by risk. A row of buttons launches the tools:</p>
+  <table>
+    <tr><th>Button</th><th>Opens</th></tr>
+    <tr><td>Refresh</td><td>Re-scans the workspace</td></tr>
+    <tr><td>Sort</td><td>Order members by risk / name / role</td></tr>
+    <tr><td>Browse channels</td><td>Per-channel membership browser</td></tr>
+    <tr><td>New review campaign</td><td>Launch an access-review campaign</td></tr>
+    <tr><td>📊 Insights</td><td>Governance insights dashboard</td></tr>
+    <tr><td>📋 Attestation</td><td>Evidence export for a campaign</td></tr>
+    <tr><td>📈 Trends</td><td>Trends &amp; access drift</td></tr>
+    <tr><td>👤 Footprint</td><td>One user's full access</td></tr>
+    <tr><td>⚙️ Domains</td><td>Internal / external domain settings</td></tr>
+    <tr><td>Revoke access</td><td>Remove a user from channels (plan-gated)</td></tr>
+    <tr><td>📥 Export</td><td>Users CSV or channel-audit CSV</td></tr>
+  </table>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access snapshot</span><span class="chip">Plan detection &amp; gating</span></div>
+</section>
+
+<section class="card" id="snapshot" data-k="snapshot risk scoring external guest sensitive">
+  <h2>📸 Access snapshot &amp; risk scoring</h2>
+  <p class="sub">The data foundation every other feature reads from.</p>
+  <h3 class="k">What it is</h3>
+  <p>A point-in-time map of the workspace: every user, every channel, who's in each channel, and a 0–100 <b>risk score</b> per channel.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>Pulls users and channels, then each channel's members, and builds a per-user access map.</li>
+    <li>Channel risk is a weighted blend of <b>external users</b>, <b>guests</b>, <b>privileged users</b> (owners/admins), <b>deactivated</b> members, and whether the channel name looks <b>sensitive</b> (finance, hr, legal, exec, security…). Bands: 🔴 Critical ≥80, 🟠 High ≥60, 🟡 Medium ≥40, 🟢 Low.</li>
+    <li>Cached briefly so the dashboard, modals, and exports reuse one scan; invalidated after a revoke or a domain change.</li>
+  </ul>
+  <div class="note">Private-channel reality: the app only sees private channels the bot is a member of. Public channels are always visible.</div>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Internal / external domains</span><span class="chip">Governance insights</span><span class="chip">Trends &amp; drift</span></div>
+</section>
+
+<section class="card" id="domains" data-k="domains internal external configure classify email">
+  <h2>⚙️ Internal / external domains</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → ⚙️ Domains</p>
+  <h3 class="k">What it is</h3>
+  <p>Decides which email domains count as <b>internal</b>; everyone else is <b>external</b>. This drives risk scores and the "external" flags in every report.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>The modal lists every email domain found in the workspace with member counts (most common first). <b>Tick = internal, untick = external.</b></li>
+    <li>Pre-ticked with your current setting, or the auto-detected majority domain if you haven't set one. A free-text box adds domains not in the list.</li>
+    <li>Precedence: <b>in-app setting → <code>INTERNAL_EMAIL_DOMAINS</code> env → majority auto-detect.</b> Tick nothing to return to auto-detect.</li>
+    <li>Saving clears the snapshot cache; press <b>Refresh</b> to recompute flags. Stored per workspace.</li>
+  </ul>
+  <div class="warn note">Auto-detect picks only the single most common domain — so a workspace full of personal Gmail addresses would wrongly treat gmail as "internal". Set your real domain here to fix it.</div>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access snapshot &amp; risk scoring</span><span class="chip">Governance insights</span></div>
+</section>
+
+<section class="card" id="campaigns" data-k="campaign review certify recurring scope reviewer">
+  <h2>📋 Access review campaigns</h2>
+  <p class="sub"><span class="pill admin">Admin launches</span> <span class="pill auto">Auto-completes</span></p>
+  <h3 class="k">What it is</h3>
+  <p>A structured certification: for a chosen scope of channels, each channel's reviewer decides <b>Keep / Remove / Flag</b> for every member, and every decision is recorded as evidence.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>Launch with a <b>name, scope</b> (all / private only / high-risk ≥70), <b>due date</b>, and <b>recurrence</b> (one-off / monthly / quarterly).</li>
+    <li>Each channel's <b>reviewer</b> is its creator (or you, if the creator has left). Reviewers get a DM with a deep-link to their queue.</li>
+    <li>Decisions are saved to the campaign and chained into the audit log. The campaign <b>auto-completes</b> when every membership is decided, and the creator is notified.</li>
+    <li>Recurring campaigns automatically spawn the next cycle when they complete or lapse.</li>
+  </ul>
+  <div class="note">A campaign "Remove"/"Flag" is a <b>decision/recommendation</b>, not an enforcement — it does not kick anyone. Enforce via Revocation from the dashboard.</div>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Reviewer queue</span><span class="chip">Reminders &amp; escalation</span><span class="chip">Review coverage</span><span class="chip">Attestation export</span><span class="chip">Revocation</span></div>
+</section>
+
+<section class="card" id="queue" data-k="queue roster paginated filter bulk keep revoke flag select all">
+  <h2>✅ Reviewer queue &amp; bulk decisions</h2>
+  <p class="sub">Built for hundreds of members per channel.</p>
+  <h3 class="k">What it is</h3>
+  <p>A two-level App Home surface that makes reviewing large channels practical instead of clicking a menu on every person.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li><b>Level 1 — channel index:</b> your channels with progress bars and "needs attention" counts.</li>
+    <li><b>Level 2 — roster:</b> a filterable, paginated member list. <b>Filters</b> (Undecided / Needs attention / All), a <b>page-size</b> selector (10 / 25 / 50), and checkboxes.</li>
+    <li><b>Bulk actions:</b> <b>Select all on page</b> then <b>Keep / Revoke / Flag selected</b> (Remove/Flag ask for one shared justification). <b>Keep all remaining routine</b> clears every non-flagged member in one click, leaving only the exceptions.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access review campaigns</span><span class="chip">Reviewer DM deep-link</span></div>
+</section>
+
+<section class="card" id="reminders" data-k="reminders escalation overdue nudge reviewer creator">
+  <h2>⏰ Reminders &amp; escalation</h2>
+  <p class="sub"><span class="pill auto">Runs daily</span></p>
+  <h3 class="k">What it is</h3>
+  <p>Automatic nudges so reviews actually get finished on time.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>A daily sweep finds active campaigns near or past their due date with pending channels.</li>
+    <li>Reviewers with unfinished channels get a <b>reminder DM</b> (channels + a one-click queue link).</li>
+    <li>When a campaign is <b>overdue</b>, the <b>creator gets an escalation DM</b> naming how many reviewers are still pending.</li>
+    <li>Runs on an interval only, so a redeploy never re-sends. Lead time tunable via <code>REVIEW_REMINDER_LEAD_DAYS</code>.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access review campaigns</span><span class="chip">Review coverage</span></div>
+</section>
+
+<section class="card" id="coverage" data-k="coverage progress per reviewer overdue behind">
+  <h2>📊 Review coverage</h2>
+  <p class="sub">Shown inside 📊 Insights.</p>
+  <h3 class="k">What it is</h3>
+  <p>How far along each active campaign is, and which reviewers are behind.</p>
+  <h3 class="k">How it works</h3>
+  <p>For each active campaign it shows the overall percent reviewed, an <b>overdue</b> flag, and the least-progressed reviewers (with @mentions and their percentages) so you know exactly who to nudge.</p>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access review campaigns</span><span class="chip">Reminders &amp; escalation</span><span class="chip">Governance insights</span></div>
+</section>
+
+<section class="card" id="attestation" data-k="attestation evidence export soc2 iso certification csv">
+  <h2>📋 Attestation / evidence export</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → 📋 Attestation</p>
+  <h3 class="k">What it is</h3>
+  <p>The auditor-ready evidence pack for a review campaign — the SOC 2 / ISO access-certification record Slack can't produce.</p>
+  <h3 class="k">How it works</h3>
+  <p>Pick a campaign; the app DMs you a CSV with <b>one row per membership</b>: channel, channel risk, member, decision, <b>reviewer, timestamp, and justification</b>. Undecided members show as "not reviewed". File name: <code>access-review-attestation-&lt;campaign&gt;-&lt;date&gt;.csv</code>.</p>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access review campaigns</span><span class="chip">Tamper-evident audit trail</span><span class="chip">Exports</span></div>
+</section>
+
+<section class="card" id="revoke" data-k="revoke revocation offboard remove kick multi channel private public">
+  <h2>🚫 Revocation &amp; offboarding</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → Revoke access (plan-gated)</p>
+  <h3 class="k">What it is</h3>
+  <p>Actually removing a user from channels — one channel, several, or all of them (offboarding) — with a durable, audited record.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li><b>Pick a user</b> and the modal reloads with a multi-select of <b>that user's channels</b>. Choose channels + a reason, or tick <b>Remove from ALL their channels</b> to offboard.</li>
+    <li>The app joins public channels automatically, then removes the user; you get a <b>progress DM</b> and a <b>per-channel result</b>. Idempotent, so a double-submit won't double-kick.</li>
+    <li>Everything is recorded: <code>ACCESS_REVOCATION_INITIATED</code> then <code>ACCESS_REVOKED</code>.</li>
+  </ul>
+  <div class="warn note">
+    <b>Two Slack constraints, with clear in-app guidance:</b><br>
+    • <b>Public channels</b> need the workspace permission <i>Roles &amp; permissions → Account types → "Remove other members from public channels"</i> = Everyone; otherwise Slack returns <code>restricted_action</code>.<br>
+    • <b>Private channels</b> require the bot to already be a member — run <code>/invite @AccessReview</code> in the channel first.
+  </div>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Plan detection &amp; gating</span><span class="chip">Access review campaigns</span><span class="chip">Access footprint</span><span class="chip">Audit trail</span></div>
+</section>
+
+<section class="card" id="requests" data-k="access request approval owner grant join member self service">
+  <h2>➕ Access request &amp; approval</h2>
+  <p class="sub"><span class="pill member">Members request</span> <span class="pill admin">Owner approves</span></p>
+  <h3 class="k">What it is</h3>
+  <p>Governed, audited self-service: members ask for channel access and the channel owner approves or denies.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>Non-admins open the app and get a <b>member home</b> with <b>➕ Request channel access</b> (pick a channel + reason).</li>
+    <li>The request is routed to the <b>channel owner</b> (creator, or an active Owner as fallback) as a DM with <b>Approve / Deny</b>.</li>
+    <li><b>Approve</b> → the app adds the member and logs <code>ACCESS_GRANTED</code>; <b>Deny</b> logs <code>ACCESS_REQUEST_DENIED</code>. The requester is DM'd the outcome.</li>
+    <li>Single-decision (can't be approved twice); only the assigned owner or an admin can decide; already-members are told so.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Tamper-evident audit trail</span><span class="chip">Revocation</span></div>
+</section>
+
+<section class="card" id="insights" data-k="insights policy separation duties sod admin sprawl orphaned remediation">
+  <h2>📊 Governance insights</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → 📊 Insights</p>
+  <h3 class="k">What it is</h3>
+  <p>A one-screen risk read-out that Slack has nothing equivalent to — computed live from the snapshot.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li><b>Risk distribution</b> + top-risk channels.</li>
+    <li><b>Guests &amp; external:</b> guest count, single-channel guests, external users, top external domains.</li>
+    <li><b>Admin sprawl:</b> admins/owners and where they sit in sensitive channels.</li>
+    <li><b>Orphaned channels:</b> creator left, or no active admin/owner.</li>
+    <li><b>Separation of duties:</b> users in both a "request" and an "approval" channel.</li>
+    <li><b>Policy violations:</b> external users in sensitive channels, private channels with &gt;2 admins, deactivated users still in channels.</li>
+    <li><b>Remediation queue:</b> remove/flag decisions awaiting enforcement. <b>Review coverage</b> for active campaigns.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access snapshot</span><span class="chip">Internal / external domains</span><span class="chip">Review coverage</span><span class="chip">Revocation</span></div>
+</section>
+
+<section class="card" id="trends" data-k="trends drift history over time joined left delta snapshot">
+  <h2>📈 Trends &amp; access drift</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → 📈 Trends</p>
+  <h3 class="k">What it is</h3>
+  <p>Change over time — the membership deltas Slack never shows.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>A compact snapshot summary is saved periodically (about every 12 hours) to build history.</li>
+    <li><b>Trends:</b> members, channels, external, guests, and high-risk channels over time, with ▲/▼ change since the previous capture.</li>
+    <li><b>Drift:</b> since the last snapshot — who joined/left which channels, the change in external users, and newly high-risk channels.</li>
+  </ul>
+  <div class="note">Shows "no history yet" on a fresh install; it fills in over the first day or two of use.</div>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access snapshot</span><span class="chip">Governance insights</span></div>
+</section>
+
+<section class="card" id="footprint" data-k="footprint per user access every channel last reviewed">
+  <h2>👤 Per-user access footprint</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → 👤 Footprint</p>
+  <h3 class="k">What it is</h3>
+  <p>One person's complete access at a glance.</p>
+  <h3 class="k">How it works</h3>
+  <p>Pick a user; the modal shows their aggregate risk, whether they're external, and <b>every channel</b> they can access with the channel's risk, private/public, and <b>when it was last reviewed</b> (from campaign decisions).</p>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Access snapshot</span><span class="chip">Revocation</span><span class="chip">Access review campaigns</span></div>
+</section>
+
+<section class="card" id="exports" data-k="export csv users channel audit all selected naming">
+  <h2>📥 Exports (CSV)</h2>
+  <p class="sub"><span class="pill admin">Admin</span> Dashboard → 📥 Export</p>
+  <h3 class="k">What it is</h3>
+  <p>Two spreadsheet exports, DM'd to you, with a consistent naming convention.</p>
+  <h3 class="k">How it works</h3>
+  <table>
+    <tr><th>Choice</th><th>Content</th><th>File name</th></tr>
+    <tr><td>Users CSV</td><td>One row per user (role, active, channel counts, risk)</td><td><code>access-review-users-&lt;date&gt;.csv</code></td></tr>
+    <tr><td>Channel audit — all</td><td>One row per channel × member, every scanned channel</td><td><code>access-review-channel-audit-all-&lt;date&gt;.csv</code></td></tr>
+    <tr><td>Channel audit — selected</td><td>Only the channels you pick</td><td><code>access-review-channel-audit-selected-Nch-&lt;date&gt;.csv</code></td></tr>
+  </table>
+  <p>Choosing "Channel audit" leads to a channel picker (specific channels or "Export ALL scanned channels"); out-of-scope picks are skipped and reported.</p>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Attestation export</span><span class="chip">Access snapshot</span></div>
+</section>
+
+<section class="card" id="audit" data-k="audit tamper evident hash chain evidence reseal hmac">
+  <h2>🔒 Tamper-evident audit trail</h2>
+  <p class="sub">The evidence backbone.</p>
+  <h3 class="k">What it is</h3>
+  <p>Every sensitive action (review decision, revocation, access grant/deny) is written to an append-only, hash-chained log that can't be silently edited.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>Each entry stores <code>prev_hash</code> + <code>hash</code>, where the hash is an <b>HMAC-SHA256</b> over the entry using a secret (<code>AUDIT_HMAC_SECRET</code>) kept outside the database — so an edited or deleted row breaks the chain.</li>
+    <li>Hashing is <b>key-order independent</b> (deterministic canonicalisation), so it survives Postgres JSONB storage.</li>
+    <li>An integrity check runs at boot and periodically. A one-time <code>scripts/reseal-audit-chain.js</code> re-seals existing rows after the canonicalisation fix.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Attestation export</span><span class="chip">Revocation</span><span class="chip">Access request &amp; approval</span></div>
+</section>
+
+<section class="card" id="plan" data-k="plan detection business plus enterprise gate revoke fail open">
+  <h2>🏷️ Plan detection &amp; gating</h2>
+  <p class="sub">Shown in the dashboard header.</p>
+  <h3 class="k">What it is</h3>
+  <p>Detects the Slack plan and only offers revoke where it can work.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li>Enterprise Grid via <code>auth.test</code>; plan tier via <code>team.billing.info</code> (needs the <code>team.billing:read</code> scope).</li>
+    <li><b>Known Free/Pro</b> → revoke hidden and the per-user modal is read-only. <b>Business+/Enterprise</b> → revoke shown.</li>
+    <li><b>Fail-open:</b> if the plan can't be read ("Unknown"), revoke stays available (Slack still enforces the real permission). Override anytime with <code>REVOKE_ENABLED=true</code>.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Revocation &amp; offboarding</span></div>
+</section>
+
+<section class="card" id="security" data-k="security multi workspace isolation scopes oauth token encryption">
+  <h2>🛡️ Security &amp; data model</h2>
+  <p class="sub">How it stays safe and separated.</p>
+  <h3 class="k">What it is</h3>
+  <p>A multi-tenant design where each workspace's data is isolated and every privileged action is authorised server-side.</p>
+  <h3 class="k">How it works</h3>
+  <ul>
+    <li><b>Isolation:</b> per-workspace bot tokens; campaigns, audit log, settings, snapshots, and requests are all keyed by <code>team_id</code>.</li>
+    <li><b>Authorisation:</b> admin-only actions re-check owner/admin status on every request (fail-closed); reviewers can only act on their assigned channels; approvers only on their requests.</li>
+    <li><b>Slack signature verification</b> on every request; tokens encrypted at rest in multi-workspace mode.</li>
+    <li><b>Uninstall</b> removes the token and wipes that workspace's data.</li>
+  </ul>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Tamper-evident audit trail</span><span class="chip">Plan detection</span></div>
+</section>
+
+<section class="card" id="config" data-k="config env vars scopes deploy render">
+  <h2>🧩 Configuration reference</h2>
+  <p class="sub">Environment variables &amp; scopes.</p>
+  <h3 class="k">Key environment variables</h3>
+  <table>
+    <tr><th>Variable</th><th>Purpose</th></tr>
+    <tr><td><code>INTERNAL_EMAIL_DOMAINS</code></td><td>Internal domains (overridden by in-app Domains setting)</td></tr>
+    <tr><td><code>REVOKE_ENABLED</code></td><td><code>true</code>/<code>false</code> to force the revoke gate on/off</td></tr>
+    <tr><td><code>REVOKE_ALLOWED_PLANS</code></td><td>Override which plan strings allow revoke</td></tr>
+    <tr><td><code>REVIEW_REMINDER_LEAD_DAYS</code></td><td>How many days before due to start reminders (default 3)</td></tr>
+    <tr><td><code>AUDIT_HMAC_SECRET</code></td><td>Secret that seals the audit chain (required in prod)</td></tr>
+    <tr><td><code>RISK_WEIGHTS</code></td><td>JSON to tune channel risk weights</td></tr>
+    <tr><td><code>SNAPSHOT_HISTORY_INTERVAL_MS</code></td><td>How often to capture history (default ~12h)</td></tr>
+  </table>
+  <h3 class="k">Bot token scopes</h3>
+  <p><code>channels:read</code> · <code>channels:manage</code> · <code>channels:join</code> · <code>groups:read</code> · <code>groups:write</code> · <code>users:read</code> · <code>users:read.email</code> · <code>chat:write</code> · <code>im:write</code> · <code>files:write</code> · <code>team.billing:read</code></p>
+  <h3 class="k">Related features</h3>
+  <div class="chips"><span class="chip">Plan detection</span><span class="chip">Domains</span><span class="chip">Audit trail</span></div>
+</section>
+
+</main>
+</div>
+
+<footer>Slack Access Review — feature guide. Generated for reference; behaviour reflects the current build.</footer>
+
+<script>
+  var links = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+  var sections = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  // active-section highlight
+  function onScroll(){
+    var y = window.scrollY + 120, cur = 0;
+    for (var i=0;i<sections.length;i++){ if(sections[i] && sections[i].offsetTop <= y) cur = i; }
+    links.forEach(function(a){a.classList.remove('active');});
+    if (links[cur]) links[cur].classList.add('active');
+  }
+  window.addEventListener('scroll', onScroll); onScroll();
+  // filter
+  var f = document.getElementById('filter');
+  f.addEventListener('input', function(){
+    var q = f.value.trim().toLowerCase();
+    document.querySelectorAll('main section.card').forEach(function(sec){
+      var hay = (sec.getAttribute('data-k')||'') + ' ' + sec.textContent.toLowerCase();
+      var show = !q || hay.indexOf(q) !== -1;
+      sec.style.display = show ? '' : 'none';
+      var id = sec.id, link = document.querySelector('#toc a[href="#'+id+'"]');
+      if (link) link.style.display = show ? '' : 'none';
+    });
+  });
+</script>
+</body>
+</html>
