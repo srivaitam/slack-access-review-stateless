@@ -44,6 +44,7 @@
 <div class="bar">
   <input id="filter" placeholder="Search a test… (e.g. revoke, export, guest)">
   <span class="prog"><b id="done">0</b> of <span id="total">0</span> done</span>
+  <span class="prog" id="saved" title="Your ticks are remembered in this browser"></span>
   <button class="btn" id="reset">Clear all ticks</button>
 </div>
 
@@ -395,16 +396,49 @@
 <footer>Tick each box as it passes. Anything that fails — note the test number and what you saw.</footer>
 
 <script>
+  var KEY = 'accessReviewTestGuide.v1';
   var boxes = Array.prototype.slice.call(document.querySelectorAll('.test input'));
+  var savedEl = document.getElementById('saved');
   document.getElementById('total').textContent = boxes.length;
+
+  // Give every test a stable key from its "T12" label so ticks survive a reload.
+  boxes.forEach(function(b, i){
+    var label = b.closest('.test').querySelector('span');
+    var txt = label ? label.textContent : '';
+    b.setAttribute('data-tid', (txt.split('—')[0] || '').trim() || ('t' + i));
+  });
+
+  function persist(){
+    var state = {};
+    boxes.forEach(function(b){ if (b.checked) state[b.getAttribute('data-tid')] = 1; });
+    try {
+      localStorage.setItem(KEY, JSON.stringify(state));
+      savedEl.textContent = '✓ progress saved in this browser';
+      savedEl.style.color = '#0f7a52';
+    } catch (e) {
+      savedEl.textContent = '⚠ this browser is blocking storage — ticks will not be kept';
+      savedEl.style.color = '#a4610b';
+    }
+  }
+  function restore(){
+    var state = {};
+    try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { state = {}; }
+    boxes.forEach(function(b){ if (state[b.getAttribute('data-tid')]) b.checked = true; });
+    var n = Object.keys(state).length;
+    savedEl.textContent = n ? '✓ progress restored' : '';
+    savedEl.style.color = '#0f7a52';
+  }
   function refresh(){
     var n = boxes.filter(function(b){return b.checked;}).length;
     document.getElementById('done').textContent = n;
     boxes.forEach(function(b){ b.closest('.test').classList.toggle('done', b.checked); });
   }
-  boxes.forEach(function(b){ b.addEventListener('change', refresh); });
+  boxes.forEach(function(b){ b.addEventListener('change', function(){ persist(); refresh(); }); });
   document.getElementById('reset').addEventListener('click', function(){
+    if (!confirm('Clear all ticks?')) return;
     boxes.forEach(function(b){ b.checked = false; });
+    try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+    savedEl.textContent = 'cleared';
     refresh();
   });
   var f = document.getElementById('filter');
@@ -422,6 +456,7 @@
       sec.style.display = (!q || anyShown || (!hasTests && secHay.indexOf(q) !== -1)) ? '' : 'none';
     });
   });
+  restore();
   refresh();
 </script>
 </body>
