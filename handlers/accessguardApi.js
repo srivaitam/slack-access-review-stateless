@@ -160,12 +160,13 @@ function makeInsightsHandler(withTeamContext) {
     try {
       const teamIds = await resolveTeamIds(req.query.team_id);
       const perTeam = {};
+      const errors = {};
       for (const tid of teamIds) {
         try {
           await withTeamContext(tid, async () => {
             const snapshot = await generateAccessSnapshot();
             const internal = await getInternalDomainsSetting();
-            const campaigns = await listCampaigns({ activeOnly: false });
+            const campaigns = await listCampaigns({ activeOnly: false, teamId: tid });
             perTeam[tid] = {
               risk: gov.riskDistribution(snapshot),
               guests_external: gov.guestExternalReport(snapshot, internal),
@@ -180,6 +181,7 @@ function makeInsightsHandler(withTeamContext) {
             };
           });
         } catch (e) {
+          errors[tid] = e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e);
           logError(`[accessguardApi] insights ${tid} failed:`, e.message);
         }
       }
@@ -187,7 +189,7 @@ function makeInsightsHandler(withTeamContext) {
       if (teamIds.length === 1 && perTeam[teamIds[0]]) {
         res.json({ team_id: teamIds[0], ...perTeam[teamIds[0]] });
       } else {
-        res.json({ per_team: perTeam });
+        res.json({ per_team: perTeam, errors });
       }
     } catch (e) {
       logError('[accessguardApi] insights handler failed:', e);
@@ -205,6 +207,7 @@ function makeTrendsHandler(withTeamContext) {
     try {
       const teamIds = await resolveTeamIds(req.query.team_id);
       const out = {};
+      const errors = {};
       for (const tid of teamIds) {
         try {
           await withTeamContext(tid, async () => {
@@ -218,13 +221,14 @@ function makeTrendsHandler(withTeamContext) {
             out[tid] = { latest: currentSummary, history, drift };
           });
         } catch (e) {
+          errors[tid] = e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : String(e);
           logError(`[accessguardApi] trends ${tid} failed:`, e.message);
         }
       }
       if (teamIds.length === 1 && out[teamIds[0]]) {
         res.json({ team_id: teamIds[0], ...out[teamIds[0]] });
       } else {
-        res.json({ per_team: out });
+        res.json({ per_team: out, errors });
       }
     } catch (e) {
       logError('[accessguardApi] trends handler failed:', e);
