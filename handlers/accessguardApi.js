@@ -13,6 +13,12 @@
  */
 const { listCampaigns, campaignProgress } = require('../services/campaignService');
 const { readAllEntries } = require('../services/auditService');
+const { generateAccessSnapshot } = require('../services/accessService');
+const gov = require('../services/governanceService');
+const {
+  getRecentSummaries, diffSummaries, summarizeSnapshot,
+} = require('../services/snapshotHistoryService');
+const { getInternalDomainsSetting } = require('../services/settingsService');
 const { logInfo, logError } = require('../utils/logger');
 
 function requireApiKey(req, res, next) {
@@ -73,7 +79,9 @@ function makeCampaignsHandler(withTeamContext) {
     try {
       const teamIds = await resolveTeamIds(req.query.team_id);
       const rows = await collectAcrossTeams(withTeamContext, teamIds, async (tid) => {
-        const list = await listCampaigns({ activeOnly: false });
+        // Pass teamId explicitly — don't rely on AsyncLocalStorage propagation
+        // through the express/promise chain, which can silently drop context.
+        const list = await listCampaigns({ activeOnly: false, teamId: tid });
         return Promise.all((list || []).map(async (c) => {
           let progress = { reviewed: 0, total: 0 };
           try {
@@ -142,6 +150,130 @@ function makeAuditHandler(withTeamContext) {
 }
 
 /**
+ * GET /api/v1/insights[?team_id=T…]
+ * Full Governance Insights payload (risk distribution, guests, admin sprawl,
+ * orphaned channels, SoD, policy violations, remediation queue).
+ * Uses the same live snapshot the Slack Home tab renders from.
+ */
+function makeInsightsHandler(withTeamContext) {
+  return async function insightsHandler(req, res) {
+    try {
+      const teamIds = await resolveTeamIds(req.query.team_id);
+      const perTeam = {};
+      for (const tid of teamIds) {
+        try {
+          await withTeamContext(tid, async () => {
+            const snapshot = await generateAccessSnapshot();
+            const internal = await getInternalDomainsSetting();
+            const campaigns = await listCampaigns({ activeOnly: false });
+            perTeam[tid] = {
+              risk: gov.riskDistribution(snapshot),
+              guests_external: gov.guestExternalReport(snapshot, internal),
+              admin_sprawl: gov.adminSprawl(snapshot),
+              orphaned_channels: gov.orphanedChannels(snapshot),
+              separation_of_duties: gov.separationOfDuties(snapshot),
+              policy_violations: gov.policyViolations(snapshot, internal),
+              remediation_queue: gov.remediationQueue(campaigns),
+              coverage: campaigns
+                .filter((c) => c.status === 'active')
+                .map((c) => ({ id: c.id, name: c.name, ...gov.reviewCoverage(c) })),
+            };
+          });
+        } catch (e) {
+          logError(`[accessguardApi] insights ${tid} failed:`, e.message);
+        }
+      }
+      // Flatten single-team responses; multi-team keeps per_team map for future.
+      if (teamIds.length === 1 && perTeam[teamIds[0]]) {
+        res.json({ team_id: teamIds[0], ...perTeam[teamIds[0]] });
+      } else {
+        res.json({ per_team: perTeam });
+      }
+    } catch (e) {
+      logError('[accessguardApi] insights handler failed:', e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
+  };
+}
+
+/**
+ * GET /api/v1/trends[?team_id=T…]
+ * Historical snapshots (~12h cadence) + drift since the previous capture.
+ */
+function makeTrendsHandler(withTeamContext) {
+  return async function trendsHandler(req, res) {
+    try {
+      const teamIds = await resolveTeamIds(req.query.team_id);
+      const out = {};
+      for (const tid of teamIds) {
+        try {
+          await withTeamContext(tid, async () => {
+            const history = (await getRecentSummaries(30)) || [];
+            const currentSnap = await generateAccessSnapshot();
+            const internal = await getInternalDomainsSetting();
+            const currentSummary = summarizeSnapshot(currentSnap, internal);
+            const drift = history.length
+              ? diffSummaries(history[history.length - 1], currentSummary)
+              : null;
+            out[tid] = { latest: currentSummary, history, drift };
+          });
+        } catch (e) {
+          logError(`[accessguardApi] trends ${tid} failed:`, e.message);
+        }
+      }
+      if (teamIds.length === 1 && out[teamIds[0]]) {
+        res.json({ team_id: teamIds[0], ...out[teamIds[0]] });
+      } else {
+        res.json({ per_team: out });
+      }
+    } catch (e) {
+      logError('[accessguardApi] trends handler failed:', e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
+  };
+}
+
+/**
+ * GET /api/v1/access-requests[?team_id=T…]
+ * All access requests (pending, approved, denied) for the given team(s).
+ */
+function makeRequestsHandler(withTeamContext) {
+  return async function requestsHandler(req, res) {
+    try {
+      const teamIds = await resolveTeamIds(req.query.team_id);
+      const rows = await collectAcrossTeams(withTeamContext, teamIds, async (tid) => {
+        // accessRequestService stores rows keyed by team; iterate via the raw file.
+        try {
+          const svc = require('../services/accessRequestService');
+          const db = require('../utils/db');
+          if (db.isDbEnabled()) {
+            const { rows } = await db.query(
+              'SELECT data FROM access_requests WHERE team_id = $1 ORDER BY (data->>\'createdAt\') DESC LIMIT 500',
+              [tid],
+            );
+            return rows.map((r) => ({ ...r.data, team_id: tid }));
+          }
+          // File-mode fallback: no cross-team filter, just return all.
+          const fs = require('fs').promises;
+          const path = require('path');
+          const p = path.join(process.cwd(), 'data', 'access-requests.json');
+          const txt = await fs.readFile(p, 'utf8').catch(() => '[]');
+          const arr = JSON.parse(txt);
+          return arr.filter((r) => !r.teamId || r.teamId === tid).map((r) => ({ ...r, team_id: tid }));
+        } catch (e) {
+          logError(`[accessguardApi] access-requests ${tid} failed:`, e.message);
+          return [];
+        }
+      });
+      res.json({ requests: rows });
+    } catch (e) {
+      logError('[accessguardApi] requests handler failed:', e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
+  };
+}
+
+/**
  * GET /api/v1/health — cheap liveness ping for AccessGuard's status card.
  * NO team context needed (and no team context possible in OAuth-only mode).
  */
@@ -157,7 +289,10 @@ function mount(app, withTeamContext) {
   app.get('/api/v1/health', requireApiKey, healthHandler);
   app.get('/api/v1/campaigns', requireApiKey, makeCampaignsHandler(withTeamContext));
   app.get('/api/v1/audit', requireApiKey, makeAuditHandler(withTeamContext));
-  logInfo('[accessguardApi] Mounted /api/v1/{health,campaigns,audit}');
+  app.get('/api/v1/insights', requireApiKey, makeInsightsHandler(withTeamContext));
+  app.get('/api/v1/trends', requireApiKey, makeTrendsHandler(withTeamContext));
+  app.get('/api/v1/access-requests', requireApiKey, makeRequestsHandler(withTeamContext));
+  logInfo('[accessguardApi] Mounted /api/v1/{health,campaigns,audit,insights,trends,access-requests}');
 }
 
 module.exports = { mount, requireApiKey };
