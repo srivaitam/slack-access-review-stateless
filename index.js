@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const { handleEvent } = require('./handlers/eventHandler');
 const { handleAction } = require('./handlers/actionHandler');
 const { handleViewSubmission } = require('./handlers/viewSubmissionHandler');
+const { mount: mountAccessGuardApi } = require('./handlers/accessguardApi');
+const { isAccessGuardPayload, forwardToAccessGuard } = require('./handlers/accessguardForwarder');
 const { logInfo, logError } = require('./utils/logger');
 const { verifyAllChains, findIncompleteRevocations } = require('./services/auditService');
 const { getClientForTeam, runWithTeam } = require('./slack/client');
@@ -34,6 +36,12 @@ app.get('/health', (req, res) => {
     mode: db.isDbEnabled() ? 'multi-workspace' : 'single-workspace'
   });
 });
+
+// ── AccessGuard bridge (read-only REST) ────────────────────────────────────
+// Exposes /api/v1/campaigns and /api/v1/audit so AccessGuard's Slack workspace
+// page can render this app's real campaigns and audit chain. Auth = shared
+// secret in X-Access-Guard-Key. Configure ACCESSGUARD_API_KEY env var.
+mountAccessGuardApi(app, withTeamContext);
 
 // ── Public OAuth install flow (multi-workspace distribution) ───────────────
 // Share https://<host>/slack/install as the "Add to Slack" link.
@@ -92,6 +100,17 @@ app.post('/slack/actions', async (req, res) => {
   }
 
   const teamId = (payload.team && payload.team.id) || (payload.user && payload.user.team_id) || null;
+
+  // AccessGuard-owned buttons (action_id / callback_id prefixed with "ag:")
+  // are proxied over HTTP to AccessGuard so its Ack/Snooze/Approve/Deny code
+  // keeps working through this shared Slack app. Ack Slack immediately.
+  if (isAccessGuardPayload(payload)) {
+    res.sendStatus(200);
+    forwardToAccessGuard(payload).catch(err =>
+      logError('AccessGuard forward error:', err)
+    );
+    return;
+  }
 
   // VIEW SUBMISSIONS need synchronous response (push/clear/errors)
   // Must respond within 3 seconds WITH the response body
