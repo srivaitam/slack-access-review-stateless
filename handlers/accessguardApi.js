@@ -1,0 +1,126 @@
+/**
+ * accessguardApi — REST bridge for AccessGuard.
+ *
+ * AccessGuard (the governance UI at app.vaitam.com) consumes these endpoints
+ * to surface Access Review v3's real campaigns and tamper-evident audit chain
+ * inside its Slack workspace page (/slack/workspace).
+ *
+ * Auth: shared secret in the `X-Access-Guard-Key` header. Set the same value
+ * in this app's env (`ACCESSGUARD_API_KEY`) and in AccessGuard's tenant Slack
+ * bridge settings. Requests without a matching key return 401.
+ *
+ * All routes are read-only; nothing here can mutate campaign or audit state.
+ */
+const { listCampaigns, campaignProgress } = require('../services/campaignService');
+const { readAllEntries } = require('../services/auditService');
+const { logInfo, logError } = require('../utils/logger');
+
+function requireApiKey(req, res, next) {
+  const expected = process.env.ACCESSGUARD_API_KEY;
+  if (!expected) {
+    return res.status(503).json({
+      error: 'ACCESSGUARD_API_KEY not set on this Access Review v3 install',
+    });
+  }
+  const provided = req.headers['x-access-guard-key'];
+  if (!provided || provided !== expected) {
+    return res.status(401).json({ error: 'invalid or missing X-Access-Guard-Key' });
+  }
+  next();
+}
+
+/**
+ * GET /api/v1/campaigns[?team_id=T…]
+ * Returns every campaign this workspace has (active + completed), with the
+ * progress figures AccessGuard renders in its Campaigns tab.
+ */
+async function campaignsHandler(req, res) {
+  try {
+    const teamId = req.query.team_id || null;
+    // listCampaigns is scoped per-team via runWithTeam context. We enter that
+    // context in index.js by calling `withTeamContext(teamId, fn)`.
+    const all = await listCampaigns({ activeOnly: false });
+    // Enrich with progress + numeric flag/removal tallies for the table.
+    const out = await Promise.all(all.map(async (c) => {
+      let progress = { reviewed: 0, total: 0 };
+      try {
+        const p = await campaignProgress(c.id);
+        progress = { reviewed: p.reviewed || 0, total: p.total || 0 };
+      } catch (_) { /* progress optional */ }
+      const decisions = Object.values(c.decisions || {}).flatMap(m => Object.values(m || {}));
+      const removals = decisions.filter(d => (d.decision || '').toLowerCase() === 'remove').length;
+      const flags = decisions.filter(d => (d.decision || '').toLowerCase() === 'flag').length;
+      const dueAt = c.dueDate ? new Date(c.dueDate).toISOString() : null;
+      const isOverdue = c.dueDate && new Date(c.dueDate) < new Date() && progress.reviewed < progress.total;
+      return {
+        id: c.id,
+        name: c.name,
+        scope: c.scope,
+        due_at: dueAt,
+        recurrence: c.recurrence || 'one-off',
+        status: c.status || (isOverdue ? 'overdue' : 'active'),
+        progress,
+        removals,
+        flags,
+        created_by: c.createdBy || null,
+        created_at: c.createdAt || null,
+        team_id: c.teamId || teamId,
+      };
+    }));
+    res.json({ campaigns: out });
+  } catch (e) {
+    logError('[accessguardApi] campaigns handler failed:', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+}
+
+/**
+ * GET /api/v1/audit[?team_id=T…&limit=100]
+ * Returns the hash-chained audit rows Access Review v3 keeps for revocations,
+ * review decisions, and access-request approvals.
+ */
+async function auditHandler(req, res) {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 1000);
+    const entries = await readAllEntries();
+    const events = entries.slice(-limit).reverse().map((e) => ({
+      timestamp: e.timestamp || e.ts || null,
+      actor: (e.actor && (e.actor.userName || e.actor.userId)) || e.actorEmail || 'system',
+      action: e.eventType || e.action || 'event',
+      target: (e.target && (e.target.name || e.target.channelName || e.target.userName)) || null,
+      event_type: e.eventType || null,
+      team_id: e.teamId || null,
+      hash: e.hash || null,
+      prev_hash: e.prevHash || null,
+      details: e.details || null,
+    }));
+    res.json({ events });
+  } catch (e) {
+    logError('[accessguardApi] audit handler failed:', e);
+    res.status(500).json({ error: String(e.message || e) });
+  }
+}
+
+/**
+ * GET /api/v1/health — cheap liveness ping for AccessGuard's status card.
+ */
+function healthHandler(_req, res) {
+  res.json({ ok: true, service: 'access-review-v3', ts: new Date().toISOString() });
+}
+
+/**
+ * Mount all AccessGuard bridge routes onto the given Express app.
+ * All routes require the X-Access-Guard-Key header.
+ */
+function mount(app, withTeamContext) {
+  app.get('/api/v1/health', requireApiKey, healthHandler);
+  app.get('/api/v1/campaigns', requireApiKey, (req, res) =>
+    withTeamContext(req.query.team_id || null, () => campaignsHandler(req, res))
+  );
+  app.get('/api/v1/audit', requireApiKey, (req, res) =>
+    withTeamContext(req.query.team_id || null, () => auditHandler(req, res))
+  );
+  logInfo('[accessguardApi] Mounted /api/v1/{health,campaigns,audit}');
+}
+
+module.exports = { mount, requireApiKey };
