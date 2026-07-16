@@ -18,7 +18,7 @@ const gov = require('../services/governanceService');
 const {
   getRecentSummaries, diffSummaries, summarizeSnapshot,
 } = require('../services/snapshotHistoryService');
-const { getInternalDomainsSetting } = require('../services/settingsService');
+const { getInternalDomains } = require('../services/riskScoringService');
 const { logInfo, logError } = require('../utils/logger');
 
 function requireApiKey(req, res, next) {
@@ -165,7 +165,7 @@ function makeInsightsHandler(withTeamContext) {
         try {
           await withTeamContext(tid, async () => {
             const snapshot = await generateAccessSnapshot();
-            const internal = await getInternalDomainsSetting();
+            const internal = getInternalDomains(snapshot.users);
             const campaigns = await listCampaigns({ activeOnly: false, teamId: tid });
             perTeam[tid] = {
               risk: gov.riskDistribution(snapshot),
@@ -213,7 +213,7 @@ function makeTrendsHandler(withTeamContext) {
           await withTeamContext(tid, async () => {
             const history = (await getRecentSummaries(30)) || [];
             const currentSnap = await generateAccessSnapshot();
-            const internal = await getInternalDomainsSetting();
+            const internal = getInternalDomains(currentSnap.users);
             const currentSummary = summarizeSnapshot(currentSnap, internal);
             const drift = history.length
               ? diffSummaries(history[history.length - 1], currentSummary)
