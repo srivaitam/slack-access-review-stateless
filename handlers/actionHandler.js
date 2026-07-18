@@ -8,7 +8,8 @@ const { buildUserAccessModal } = require('../modals/userAccessModal');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
 const { getWorkspacePlan } = require('../services/planService');
 const { buildDomainSettingsModal } = require('../modals/domainSettingsModal');
-const { getInternalDomainsSetting } = require('../services/settingsService');
+const { buildTabSettingsModal } = require('../modals/tabSettingsModal');
+const { getInternalDomainsSetting, getHiddenTabsSetting } = require('../services/settingsService');
 const { buildInsightsView } = require('../views/insightsView');
 const { buildAttestationModal } = require('../modals/attestationModal');
 const { buildExportModal } = require('../modals/exportModal');
@@ -73,7 +74,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_insights', 'open_attestation', 'open_trends',
+    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_tabs_settings', 'open_insights', 'open_attestation', 'open_trends',
     'open_footprint', 'footprint_user_select', 'open_export', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
@@ -94,9 +95,10 @@ async function handleAction(payload) {
       const snapshot = await generateAccessSnapshot({ force: true });
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       const plan = await getWorkspacePlan().catch(() => ({}));
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan })
+        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan, hiddenTabs })
       });
     }
 
@@ -106,9 +108,10 @@ async function handleAction(payload) {
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       const plan = await getWorkspacePlan().catch(() => ({}));
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, sortBy, campaigns, { plan })
+        view: buildAccessOverviewView(snapshot, sortBy, campaigns, { plan, hiddenTabs })
       });
     }
 
@@ -119,9 +122,10 @@ async function handleAction(payload) {
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       const plan = await getWorkspacePlan().catch(() => ({}));
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, state.sortBy, campaigns, { showDeactivated: state.show, plan })
+        view: buildAccessOverviewView(snapshot, state.sortBy, campaigns, { showDeactivated: state.show, plan, hiddenTabs })
       });
     }
 
@@ -223,6 +227,12 @@ async function handleAction(payload) {
         discovered = Object.entries(counts).map(([domain, count]) => ({ domain, count })).sort((a, b) => b.count - a.count);
       } catch (e) { /* best effort */ }
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildDomainSettingsModal({ discovered, currentDomains: current, detected }) });
+    }
+
+    // ─── Customize which dashboard toolbar tabs are shown (per-workspace) ───
+    if (action === 'open_tabs_settings') {
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
+      await slack.views.open({ trigger_id: payload.trigger_id, view: buildTabSettingsModal({ hiddenTabs }) });
     }
 
     // ─── F-007/F-008: multi-channel revoke — plan-gated, then open the modal ───
@@ -491,7 +501,8 @@ async function handleReviewHome(payload) {
       // Must pass the plan — without it the header falls back to "Unknown" and
       // the Revoke button disappears until you hit Refresh.
       const plan = await getWorkspacePlan().catch(() => ({}));
-      await slack.views.publish({ user_id: userId, view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan }) });
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
+      await slack.views.publish({ user_id: userId, view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan, hiddenTabs }) });
       return;
     }
 

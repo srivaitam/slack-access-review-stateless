@@ -6,8 +6,9 @@ const { logAuditEvent } = require('../services/auditService');
 const { generateAccessSnapshot, invalidateSnapshotCache } = require('../services/accessService');
 const { generateCSV, generateMembershipCSV, generateAttestationCSV } = require('../services/exportService');
 const { buildChannelAuditExportModal } = require('../views/channelBrowserModal');
-const { saveInternalDomains } = require('../services/settingsService');
-const { createCampaign, recordDecision, recordDecisions, getCampaign } = require('../services/campaignService');
+const { saveInternalDomains, saveHiddenTabs } = require('../services/settingsService');
+const { buildAccessOverviewView } = require('../views/usersAccessView');
+const { createCampaign, recordDecision, recordDecisions, getCampaign, listCampaigns } = require('../services/campaignService');
 const { sendReviewChecklists, markDecisionInMessage, notifyCampaignComplete } = require('../services/reviewDelegationService');
 const { buildReviewRosterView } = require('../views/reviewHomeView');
 const { buildRevokeAccessModal } = require('../modals/revokeAccessModal');
@@ -51,7 +52,7 @@ async function handleViewSubmission(payload) {
   // Authorization (C3): revocation flows require a workspace owner/admin,
   // re-checked server-side on every submission — never trust the UI gate alone.
   // Campaign creation (F-003) is admin-only too.
-  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal' || callbackId === 'attestation_modal' || callbackId === 'export_modal') {
+  if (callbackId === 'user_access_modal' || callbackId === 'confirm_revocation' || callbackId === 'campaign_create_modal' || callbackId === 'channel_audit_export_modal' || callbackId === 'revoke_access_modal' || callbackId === 'domain_settings_modal' || callbackId === 'tab_settings_modal' || callbackId === 'attestation_modal' || callbackId === 'export_modal') {
     if (!(await isWorkspaceAdmin(adminId))) {
       return {
         response_action: 'update',
@@ -183,6 +184,29 @@ async function handleViewSubmission(payload) {
         ? `✅ Internal domains set to *${domains.join(', ')}*. Everyone else is external. Open Access Review → *Refresh* to recompute.`
         : '✅ Cleared — the app will auto-detect the most common domain again. Open Access Review → *Refresh* to recompute.'
     }));
+    return { response_action: 'clear' };
+  }
+
+  // Customize dashboard tabs — save the hidden set (admin-only, gated above) and
+  // republish the App Home so the change is visible immediately. Selected = hide.
+  if (callbackId === 'tab_settings_modal') {
+    const v = payload.view.state.values;
+    const selected = (v.tabs_select?.tabs_multi?.selected_options || []).map(o => String(o.value));
+    const hiddenTabs = await saveHiddenTabs(selected);
+    setImmediate(async () => {
+      try {
+        const snapshot = await generateAccessSnapshot();
+        const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
+        const plan = await getWorkspacePlan().catch(() => ({}));
+        await slack.views.publish({
+          user_id: adminId,
+          view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan, hiddenTabs })
+        });
+      } catch (e) {
+        console.error('[TABS] republish failed:', e.message);
+        await dmUser(adminId, { text: '✅ Tab settings saved. Reopen the App Home to see the change.' });
+      }
+    });
     return { response_action: 'clear' };
   }
 

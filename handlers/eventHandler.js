@@ -5,6 +5,7 @@ const { buildAccessOverviewView } = require('../views/usersAccessView');
 const { isWorkspaceAdmin } = require('../utils/authz');
 const { listCampaigns } = require('../services/campaignService');
 const { getWorkspacePlan } = require('../services/planService');
+const { getHiddenTabsSetting } = require('../services/settingsService');
 const { buildMemberHomeView } = require('../modals/accessRequestModal');
 
 function homeMessage(text) {
@@ -46,9 +47,10 @@ async function handleEvent(event) {
       const snapshot = await generateAccessSnapshot();
       const campaigns = await listCampaigns({ activeOnly: true }).catch(() => []);
       const plan = await getWorkspacePlan().catch(() => ({}));
+      const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
       await slack.views.publish({
         user_id: userId,
-        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan })
+        view: buildAccessOverviewView(snapshot, 'riskScore', campaigns, { plan, hiddenTabs })
       });
     } catch (error) {
       console.error('Home load error:', error.message);

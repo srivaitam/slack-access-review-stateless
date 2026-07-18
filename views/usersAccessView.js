@@ -9,6 +9,24 @@ const SORT_OPTIONS = [
 
 const ROLE_RANK = { Owner: 0, Admin: 1, Member: 2, Guest: 3 };
 
+// Toolbar buttons an admin is allowed to hide via ⚙️ Customize tabs. `Refresh`
+// and the `Customize tabs` control itself are intentionally NOT in this list —
+// they always render, so the full toolbar can always be restored. The keys are
+// the persisted identifiers (settingsService hiddenTabs); the labels are shown
+// in the customize modal. Keep this in sync with the toolbar built below.
+const HIDEABLE_TABS = [
+  { key: 'sort', label: 'Sort selector' },
+  { key: 'browse', label: 'Browse channels' },
+  { key: 'campaign', label: 'New review campaign' },
+  { key: 'insights', label: 'Insights' },
+  { key: 'attestation', label: 'Attestation' },
+  { key: 'trends', label: 'Trends' },
+  { key: 'footprint', label: 'Footprint' },
+  { key: 'domains', label: 'Domains' },
+  { key: 'revoke', label: 'Revoke access' },
+  { key: 'export', label: 'Export' }
+];
+
 function sortUsers(arr, sortBy) {
   if (sortBy === 'name') {
     arr.sort((a, b) => a.user.name.localeCompare(b.user.name));
@@ -55,6 +73,35 @@ function userRow(userAccess) {
     },
     { type: 'divider' }
   ];
+}
+
+// Build the dashboard toolbar as a Block Kit `actions` block. Any tab whose key
+// is in `hiddenTabs` is omitted. `Refresh` and `⚙️ Customize tabs` always show
+// so an admin can never lock themselves out of restoring the toolbar. `Revoke`
+// additionally requires a plan that permits revocation.
+function buildToolbar(sortBy, plan = {}, hiddenTabs = []) {
+  const hidden = new Set(hiddenTabs || []);
+  const shown = key => !hidden.has(key);
+  const elements = [
+    { type: 'button', text: { type: 'plain_text', text: 'Refresh' }, action_id: 'refresh_access_data', style: 'primary' }
+  ];
+  if (shown('sort')) elements.push({
+    type: 'static_select',
+    action_id: 'sort_users',
+    initial_option: SORT_OPTIONS.find(o => o.value === sortBy) || SORT_OPTIONS[0],
+    options: SORT_OPTIONS
+  });
+  if (shown('browse')) elements.push({ type: 'button', text: { type: 'plain_text', text: 'Browse channels' }, action_id: 'browse_channels' });
+  if (shown('campaign')) elements.push({ type: 'button', text: { type: 'plain_text', text: 'New review campaign' }, action_id: 'create_campaign' });
+  if (shown('insights')) elements.push({ type: 'button', text: { type: 'plain_text', text: '📊 Insights' }, action_id: 'open_insights' });
+  if (shown('attestation')) elements.push({ type: 'button', text: { type: 'plain_text', text: '📋 Attestation' }, action_id: 'open_attestation' });
+  if (shown('trends')) elements.push({ type: 'button', text: { type: 'plain_text', text: '📈 Trends' }, action_id: 'open_trends' });
+  if (shown('footprint')) elements.push({ type: 'button', text: { type: 'plain_text', text: '👤 Footprint' }, action_id: 'open_footprint' });
+  if (shown('domains')) elements.push({ type: 'button', text: { type: 'plain_text', text: '⚙️ Domains' }, action_id: 'open_domain_settings' });
+  if (plan.canRevoke && shown('revoke')) elements.push({ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' });
+  if (shown('export')) elements.push({ type: 'button', text: { type: 'plain_text', text: '📥 Export' }, action_id: 'open_export' });
+  elements.push({ type: 'button', text: { type: 'plain_text', text: '⚙️ Customize tabs' }, action_id: 'open_tabs_settings' });
+  return { type: 'actions', block_id: 'dashboard_toolbar', elements };
 }
 
 function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [], opts = {}) {
@@ -104,27 +151,7 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
           (plan.canRevoke ? '' : ' · _revocation requires Business+ or Enterprise Grid_')
       }]
     },
-    {
-      type: 'actions',
-      elements: [
-        { type: 'button', text: { type: 'plain_text', text: 'Refresh' }, action_id: 'refresh_access_data', style: 'primary' },
-        {
-          type: 'static_select',
-          action_id: 'sort_users',
-          initial_option: SORT_OPTIONS.find(o => o.value === sortBy) || SORT_OPTIONS[0],
-          options: SORT_OPTIONS
-        },
-        { type: 'button', text: { type: 'plain_text', text: 'Browse channels' }, action_id: 'browse_channels' },
-        { type: 'button', text: { type: 'plain_text', text: 'New review campaign' }, action_id: 'create_campaign' },
-        { type: 'button', text: { type: 'plain_text', text: '📊 Insights' }, action_id: 'open_insights' },
-        { type: 'button', text: { type: 'plain_text', text: '📋 Attestation' }, action_id: 'open_attestation' },
-        { type: 'button', text: { type: 'plain_text', text: '📈 Trends' }, action_id: 'open_trends' },
-        { type: 'button', text: { type: 'plain_text', text: '👤 Footprint' }, action_id: 'open_footprint' },
-        { type: 'button', text: { type: 'plain_text', text: '⚙️ Domains' }, action_id: 'open_domain_settings' },
-        ...(plan.canRevoke ? [{ type: 'button', text: { type: 'plain_text', text: 'Revoke access' }, action_id: 'open_revoke_modal', style: 'danger' }] : []),
-        { type: 'button', text: { type: 'plain_text', text: '📥 Export' }, action_id: 'open_export' }
-      ]
-    },
+    buildToolbar(sortBy, plan, opts.hiddenTabs),
     { type: 'divider' }
   ];
 
@@ -202,4 +229,4 @@ function buildAccessOverviewView(snapshot, sortBy = 'riskScore', campaigns = [],
   return { type: 'home', blocks };
 }
 
-module.exports = { buildAccessOverviewView };
+module.exports = { buildAccessOverviewView, buildToolbar, HIDEABLE_TABS };
