@@ -38,28 +38,44 @@ const HEADER = [
   { type: 'divider' },
 ];
 
-function buildAlertsView({ alerts = [], configured = true, connected = true, error = null } = {}) {
+function buildAlertsView({ alerts = [], configured = true, ok = true, connected = true, reason = null, target = null, teamId = null } = {}) {
   const blocks = [...HEADER];
 
+  // 1) Env vars missing on this app.
   if (!configured) {
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: '⚙️ *AccessGuard isn\'t connected yet.*\nSet `ACCESSGUARD_BASE_URL` and `ACCESSGUARD_API_KEY` on this app (the same shared secret AccessGuard uses) so alerts can be pulled in.',
+        text: '⚙️ *AccessGuard isn\'t connected yet.*\nSet `ACCESSGUARD_BASE_URL` and `ACCESSGUARD_API_KEY` on this app (the same shared secret AccessGuard uses), then Refresh.',
       },
     });
     return { type: 'home', blocks };
   }
 
-  if (error || !connected) {
+  // 2) Reached-or-not failure — show the exact reason so it's diagnosable.
+  if (ok === false) {
+    blocks.push({
+      type: 'section',
+      text: { type: 'mrkdwn', text: '⚠️ *Couldn\'t reach AccessGuard.*' },
+    });
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `Reason: *${reason || 'unknown'}*${target ? ` · calling \`${target}\`` : ''}${teamId ? ` · team \`${teamId}\`` : ''}` }],
+    });
+    return { type: 'home', blocks };
+  }
+
+  // 3) Reached AccessGuard, but this workspace isn't mapped to a tenant.
+  if (!connected) {
     blocks.push({
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: '⚠️ *Couldn\'t load alerts from AccessGuard right now.*\nThis workspace may not be linked to an AccessGuard tenant yet, or the service is temporarily unavailable. Try Refresh in a moment.',
+        text: '🔌 *This Slack workspace isn\'t linked to an AccessGuard tenant.*\nConnect this workspace inside AccessGuard so it stores this team\'s ID, then Refresh.',
       },
     });
+    if (teamId) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `This workspace\'s team ID: \`${teamId}\`` }] });
     return { type: 'home', blocks };
   }
 
