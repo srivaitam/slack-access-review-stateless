@@ -15,6 +15,7 @@ const ROLE_RANK = { Owner: 0, Admin: 1, Member: 2, Guest: 3 };
 // the persisted identifiers (settingsService hiddenTabs); the labels are shown
 // in the customize modal. Keep this in sync with the toolbar built below.
 const HIDEABLE_TABS = [
+  { key: 'alerts', label: 'Alerts (from AccessGuard)' },
   { key: 'sort', label: 'Sort selector' },
   { key: 'browse', label: 'Browse channels' },
   { key: 'campaign', label: 'New review campaign' },
@@ -85,6 +86,7 @@ function buildToolbar(sortBy, plan = {}, hiddenTabs = []) {
   const elements = [
     { type: 'button', text: { type: 'plain_text', text: 'Refresh' }, action_id: 'refresh_access_data', style: 'primary' }
   ];
+  if (shown('alerts')) elements.push({ type: 'button', text: { type: 'plain_text', text: '🚨 Alerts' }, action_id: 'open_alerts' });
   if (shown('sort')) elements.push({
     type: 'static_select',
     action_id: 'sort_users',

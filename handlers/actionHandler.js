@@ -10,6 +10,8 @@ const { getWorkspacePlan } = require('../services/planService');
 const { buildDomainSettingsModal } = require('../modals/domainSettingsModal');
 const { buildTabSettingsModal } = require('../modals/tabSettingsModal');
 const { getInternalDomainsSetting, getHiddenTabsSetting } = require('../services/settingsService');
+const { fetchAlerts } = require('../services/accessguardClient');
+const { buildAlertsView } = require('../views/alertsView');
 const { buildInsightsView } = require('../views/insightsView');
 const { buildAttestationModal } = require('../modals/attestationModal');
 const { buildExportModal } = require('../modals/exportModal');
@@ -74,7 +76,7 @@ async function handleAction(payload) {
   const ADMIN_ONLY = new Set([
     'refresh_access_data', 'export_csv', 'export_excel',
     'export_membership_csv', 'browse_channels', 'channel_browser_select', 'create_campaign',
-    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_tabs_settings', 'open_insights', 'open_attestation', 'open_trends',
+    'open_revoke_modal', 'revoke_user_select', 'open_domain_settings', 'open_tabs_settings', 'open_alerts', 'open_insights', 'open_attestation', 'open_trends',
     'open_footprint', 'footprint_user_select', 'open_export', 'sort_users', 'toggle_deactivated'
   ]);
   if (ADMIN_ONLY.has(action) && !(await isWorkspaceAdmin(userId))) {
@@ -233,6 +235,13 @@ async function handleAction(payload) {
     if (action === 'open_tabs_settings') {
       const hiddenTabs = await getHiddenTabsSetting().catch(() => []);
       await slack.views.open({ trigger_id: payload.trigger_id, view: buildTabSettingsModal({ hiddenTabs }) });
+    }
+
+    // ─── Alerts tab — behavioral alerts pulled from AccessGuard ───
+    if (action === 'open_alerts') {
+      await slack.views.publish({ user_id: userId, view: buildLoadingView('Loading alerts from AccessGuard…') });
+      const result = await fetchAlerts({ limit: 25 }).catch(() => ({ configured: true, connected: false, alerts: [] }));
+      await slack.views.publish({ user_id: userId, view: buildAlertsView(result) });
     }
 
     // ─── F-007/F-008: multi-channel revoke — plan-gated, then open the modal ───
